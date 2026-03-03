@@ -1,0 +1,67 @@
+﻿:root {
+  color-scheme: light;
+  --bg: #f6f8fb;
+  --panel: #ffffff;
+  --border: #e6eaf0;
+  --text: #1f2937;
+  --muted: #667085;
+  --accent: #3b82f6;
+  --accent-strong: #2563eb;
+  --accent-soft: #eaf2ff;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 20rem;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Roboto, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  letter-spacing: 0.2px;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c8d1df transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #c8d1df;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+a {
+  color: inherit;
+}
+
+::selection {
+  background: rgba(59, 130, 246, 0.24);
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.35);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
