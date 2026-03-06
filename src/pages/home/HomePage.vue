@@ -15,15 +15,19 @@
     >
 
     <div class="mode-bar-shell">
-      <header class="mode-bar">
-        <div class="mode-icon-group">
-          <span
-            class="mode-icon-wrap"
-            data-tip="阅读模式"
+      <header
+        class="mode-bar"
+        @keydown.esc="closeMoreActions"
+      >
+        <div class="mode-bar-left">
+          <div
+            class="mode-segment"
+            role="tablist"
+            aria-label="阅读与编辑模式"
           >
             <button
               type="button"
-              class="mode-icon-button"
+              class="mode-segment-button"
               :class="{ active: !isEditMode }"
               aria-label="阅读模式"
               @click="setMode('read')"
@@ -46,16 +50,12 @@
                   stroke-linecap="round"
                 />
               </svg>
+              <span>阅读</span>
             </button>
-          </span>
 
-          <span
-            class="mode-icon-wrap"
-            :data-tip="editModeTooltip"
-          >
             <button
               type="button"
-              class="mode-icon-button"
+              class="mode-segment-button"
               :class="{ active: isEditMode }"
               :disabled="!editorApiEnabled"
               aria-label="编辑模式"
@@ -79,45 +79,70 @@
                   stroke-linecap="round"
                 />
               </svg>
+              <span>编辑</span>
             </button>
-          </span>
+          </div>
+        </div>
 
-          <template v-if="isEditMode">
+        <div class="mode-bar-center">
+          <div class="status-chip-group">
             <span
-              class="mode-icon-wrap"
-              :data-tip="resetActionTooltip"
+              class="status-chip status-chip-edit"
+              :class="`tone-${barEditStateTone}`"
             >
-              <button
-                type="button"
-                class="mode-icon-button"
-                :disabled="!editorDirty || operationBusy"
-                aria-label="重置修改"
-                @click="resetEditorContent"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M8 7H4v4"
-                    stroke="currentColor"
-                    stroke-width="1.8"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                  <path
-                    d="M20 11a8 8 0 1 0-2.4 5.7"
-                    stroke="currentColor"
-                    stroke-width="1.8"
-                    stroke-linecap="round"
-                  />
-                </svg>
-              </button>
+              <span class="status-chip-dot" />
+              {{ barEditStateLabel }}
             </span>
-
             <span
-              class="mode-icon-wrap"
+              class="status-chip status-chip-task"
+              :class="`tone-${barTaskStateTone}`"
+            >
+              <span class="status-chip-dot" />
+              {{ barTaskStateLabel }}
+            </span>
+            <span
+              class="status-chip status-chip-env"
+              :class="`tone-${barEnvStateTone}`"
+            >
+              <span class="status-chip-dot" />
+              {{ barEnvStateLabel }}
+            </span>
+            <button
+              type="button"
+              class="status-reload-button"
+              :disabled="!canReloadAll"
+              aria-label="重新加载全部文章"
+              @click="reloadAllArticles"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+                :class="{ spinning: reloadBusy }"
+              >
+                <path
+                  d="M20 12a8 8 0 1 1-2.3-5.7"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M20 5v6h-6"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span>{{ reloadBusy ? "重载中..." : "重新加载" }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="mode-bar-right">
+          <div class="mode-action-cluster mode-action-cluster-core">
+            <span
+              class="mode-icon-wrap mode-mobile-main-action"
               :data-tip="saveActionTooltip"
             >
               <button
@@ -154,80 +179,306 @@
                 </svg>
               </button>
             </span>
-          </template>
+          </div>
 
-          <span
-            class="mode-icon-wrap"
-            :data-tip="pathSettingsTooltip"
+          <div
+            v-if="showEditActionGroup"
+            class="mode-action-cluster mode-action-cluster-edit"
           >
-            <button
-              type="button"
-              class="mode-icon-button"
-              :disabled="!editorApiEnabled || operationBusy || settingsSaving"
-              aria-label="路径设置"
-              @click="openPathSettingsDialog"
+            <span
+              class="mode-icon-wrap mobile-hidden-action"
+              :data-tip="resetActionTooltip"
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                aria-hidden="true"
+              <button
+                type="button"
+                class="mode-icon-button"
+                :disabled="!editorDirty || operationBusy"
+                aria-label="重置修改"
+                @click="resetEditorContent"
               >
-                <path
-                  d="M10.8 3.2h2.4l.5 2.2a7 7 0 0 1 1.7.7l1.9-1.2 1.7 1.7-1.2 1.9a7 7 0 0 1 .7 1.7l2.2.5v2.4l-2.2.5a7 7 0 0 1-.7 1.7l1.2 1.9-1.7 1.7-1.9-1.2a7 7 0 0 1-1.7.7l-.5 2.2h-2.4l-.5-2.2a7 7 0 0 1-1.7-.7l-1.9 1.2-1.7-1.7 1.2-1.9a7 7 0 0 1-.7-1.7l-2.2-.5v-2.4l2.2-.5a7 7 0 0 1 .7-1.7l-1.2-1.9 1.7-1.7 1.9 1.2a7 7 0 0 1 1.7-.7l.5-2.2z"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linejoin="round"
-                />
-                <circle
-                  cx="12"
-                  cy="12"
-                  r="2.5"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                />
-              </svg>
-            </button>
-          </span>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M8 7H4v4"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M20 11a8 8 0 1 0-2.4 5.7"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+            </span>
 
-          <span
-            class="mode-icon-wrap"
-            :data-tip="publishTooltip"
-          >
-            <button
-              type="button"
-              class="mode-icon-button"
-              :disabled="!editorApiEnabled || operationBusy || settingsSaving || publishBusy"
-              aria-label="一键上传文档"
-              @click="openPublishDialog"
+            <span
+              class="mode-icon-wrap mobile-hidden-action"
+              :data-tip="typoraActionTooltip"
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                aria-hidden="true"
+              <button
+                type="button"
+                class="mode-icon-button"
+                :disabled="!canOpenInTypora"
+                aria-label="用 Typora 打开当前文章"
+                @click="openCurrentArticleInTypora"
               >
-                <path
-                  d="M12 15V5"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                />
-                <path
-                  d="M8.8 8.2 12 5l3.2 3.2"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="M5 14.5v3.2A1.3 1.3 0 0 0 6.3 19h11.4a1.3 1.3 0 0 0 1.3-1.3v-3.2"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
-          </span>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M14 4h6v6"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M10 14 20 4"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M20 13.5V19a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V5A1.5 1.5 0 0 1 5 3.5h5.5"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </span>
+          </div>
+
+          <div class="mode-action-cluster mode-action-cluster-repo">
+            <span
+              class="mode-icon-wrap mobile-hidden-action"
+              :data-tip="pathSettingsTooltip"
+            >
+              <button
+                type="button"
+                class="mode-icon-button"
+                :disabled="!editorApiEnabled || operationBusy || settingsSaving"
+                aria-label="路径设置"
+                @click="openPathSettingsDialog"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M10.8 3.2h2.4l.5 2.2a7 7 0 0 1 1.7.7l1.9-1.2 1.7 1.7-1.2 1.9a7 7 0 0 1 .7 1.7l2.2.5v2.4l-2.2.5a7 7 0 0 1-.7 1.7l1.2 1.9-1.7 1.7-1.9-1.2a7 7 0 0 1-1.7.7l-.5 2.2h-2.4l-.5-2.2a7 7 0 0 1-1.7-.7l-1.9 1.2-1.7-1.7 1.2-1.9a7 7 0 0 1-.7-1.7l-2.2-.5v-2.4l2.2-.5a7 7 0 0 1 .7-1.7l-1.2-1.9 1.7-1.7 1.9 1.2a7 7 0 0 1 1.7-.7l.5-2.2z"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linejoin="round"
+                  />
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="2.5"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                  />
+                </svg>
+              </button>
+            </span>
+
+            <span
+              class="mode-icon-wrap mobile-hidden-action"
+              :data-tip="backupTooltip"
+            >
+              <button
+                type="button"
+                class="mode-icon-button"
+                :disabled="backupBusy"
+                aria-label="一键备份文档仓库"
+                @click="openBackupDialog"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M4.8 7.5h14.4A1.8 1.8 0 0 1 21 9.3v8.9A1.8 1.8 0 0 1 19.2 20H4.8A1.8 1.8 0 0 1 3 18.2V9.3A1.8 1.8 0 0 1 4.8 7.5z"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M8 7.5V5.7A1.7 1.7 0 0 1 9.7 4h4.6A1.7 1.7 0 0 1 16 5.7v1.8"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M8.5 13h7"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M12 10.2V15.8"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+            </span>
+
+            <span
+              class="mode-icon-wrap mobile-hidden-action"
+              :data-tip="publishTooltip"
+            >
+              <button
+                type="button"
+                class="mode-icon-button"
+                :disabled="!editorApiEnabled || operationBusy || settingsSaving || publishBusy"
+                aria-label="一键上传文档"
+                @click="openPublishDialog"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M12 15V5"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M8.8 8.2 12 5l3.2 3.2"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M5 14.5v3.2A1.3 1.3 0 0 0 6.3 19h11.4a1.3 1.3 0 0 0 1.3-1.3v-3.2"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </span>
+          </div>
+
+          <div
+            ref="moreActionsRef"
+            class="mode-more-wrap"
+            @click.stop
+          >
+            <span
+              class="mode-icon-wrap"
+              data-tip="更多操作"
+            >
+              <button
+                type="button"
+                class="mode-icon-button mode-more-toggle"
+                :class="{ active: moreActionsOpen }"
+                aria-label="更多操作"
+                @click="toggleMoreActions"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <circle
+                    cx="6"
+                    cy="12"
+                    r="1.6"
+                    fill="currentColor"
+                  />
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="1.6"
+                    fill="currentColor"
+                  />
+                  <circle
+                    cx="18"
+                    cy="12"
+                    r="1.6"
+                    fill="currentColor"
+                  />
+                </svg>
+              </button>
+            </span>
+
+            <Transition name="fade-content">
+              <div
+                v-if="moreActionsOpen"
+                class="mode-more-panel"
+              >
+                <button
+                  v-if="showEditActionGroup"
+                  type="button"
+                  class="mode-more-item"
+                  :disabled="!editorDirty || operationBusy"
+                  @click="handleMoreReset"
+                >
+                  重置修改
+                </button>
+                <button
+                  v-if="showEditActionGroup"
+                  type="button"
+                  class="mode-more-item"
+                  :disabled="!canOpenInTypora"
+                  @click="handleMoreTypora"
+                >
+                  用 Typora 打开
+                </button>
+                <button
+                  type="button"
+                  class="mode-more-item"
+                  :disabled="!canReloadAll"
+                  @click="handleMoreReload"
+                >
+                  {{ reloadBusy ? "重新加载中..." : "重新加载文章" }}
+                </button>
+                <button
+                  type="button"
+                  class="mode-more-item"
+                  :disabled="!editorApiEnabled || operationBusy || settingsSaving"
+                  @click="handleMorePathSettings"
+                >
+                  路径设置
+                </button>
+                <button
+                  type="button"
+                  class="mode-more-item"
+                  :disabled="backupBusy"
+                  @click="handleMoreBackup"
+                >
+                  一键备份
+                </button>
+                <button
+                  type="button"
+                  class="mode-more-item"
+                  :disabled="!editorApiEnabled || operationBusy || settingsSaving || publishBusy"
+                  @click="handleMorePublish"
+                >
+                  一键上传
+                </button>
+              </div>
+            </Transition>
+          </div>
         </div>
       </header>
     </div>
@@ -485,6 +736,15 @@
         @click.self="closeCreateDialog"
       >
         <section class="dialog-card">
+          <button
+            type="button"
+            class="dialog-close"
+            aria-label="关闭弹窗"
+            :disabled="operationBusy"
+            @click="closeCreateDialog"
+          >
+            ×
+          </button>
           <h3>在 {{ createDialogSectionTitle }} 新建文章</h3>
           <p>请输入文件名，标题会与文件名保持一致，文件会直接写入 document/docs。</p>
 
@@ -526,24 +786,42 @@
         @click.self="closePathSettingsDialog"
       >
         <section class="dialog-card">
-          <h3>项目路径设置</h3>
-          <p>设置 document 与 chain-code.github.io 项目路径后，将自动刷新内容。</p>
+          <button
+            type="button"
+            class="dialog-close"
+            aria-label="关闭弹窗"
+            :disabled="settingsSaving"
+            @click="closePathSettingsDialog"
+          >
+            ×
+          </button>
+          <h3>仓库与备份路径设置</h3>
+          <p>请填写本机绝对路径，目录名可自定义，不要求必须叫 document 或 chain-code.github.io。</p>
 
           <label class="dialog-label">
-            document 项目路径
+            内容仓库路径（需包含 docs/ 与 _index.md）
             <input
               v-model.trim="pathSettingsDocumentProjectPath"
               type="text"
-              placeholder="例如：C:/Users/tianzhiwei/Desktop/document"
+              placeholder="例如：D:/workspace/my-blog-content"
             >
           </label>
 
           <label class="dialog-label">
-            chain-code.github.io 项目路径
+            部署仓库路径（用于站点发布）
             <input
               v-model.trim="pathSettingsChainCodeRepoPath"
               type="text"
-              placeholder="例如：C:/Users/tianzhiwei/go/src/chain-code.github.io"
+              placeholder="例如：D:/workspace/blog-deploy"
+            >
+          </label>
+
+          <label class="dialog-label">
+            备份输出路径（用于一键备份）
+            <input
+              v-model.trim="pathSettingsBackupRootPath"
+              type="text"
+              placeholder="例如：E:/blog-backups"
             >
           </label>
 
@@ -583,6 +861,15 @@
         @click.self="closePublishDialog"
       >
         <section class="dialog-card">
+          <button
+            type="button"
+            class="dialog-close"
+            aria-label="关闭弹窗"
+            :disabled="publishBusy"
+            @click="closePublishDialog"
+          >
+            ×
+          </button>
           <h3>一键上传文档</h3>
           <p>按顺序执行 git pull → git add . → git commit → git push，并实时显示命令行输出。</p>
 
@@ -676,6 +963,143 @@
         </section>
       </div>
     </Transition>
+
+    <Transition name="fade-content">
+      <div
+        v-if="backupDialogVisible"
+        class="dialog-overlay"
+        @click.self="closeBackupDialog"
+      >
+        <section class="dialog-card">
+          <button
+            type="button"
+            class="dialog-close"
+            aria-label="关闭弹窗"
+            :disabled="backupBusy"
+            @click="closeBackupDialog"
+          >
+            ×
+          </button>
+          <h3>一键备份内容仓库</h3>
+          <p>将内容仓库完整复制到备份路径，备份目录名按当前时间生成（精确到秒）。</p>
+
+          <p class="dialog-tip muted">
+            源仓库：{{ pathSettingsDocumentProjectPath || "未设置" }}
+          </p>
+          <p class="dialog-tip muted">
+            备份根路径：{{ pathSettingsBackupRootPath || "未设置" }}
+          </p>
+
+          <div class="publish-steps">
+            <span :class="['publish-step', ['prepare', 'scan', 'copy', 'done'].includes(backupJobStage) ? 'active' : '']">prepare</span>
+            <span :class="['publish-step', ['scan', 'copy', 'done'].includes(backupJobStage) ? 'active' : '']">scan</span>
+            <span :class="['publish-step', ['copy', 'done'].includes(backupJobStage) ? 'active' : '']">copy</span>
+            <span :class="['publish-step', backupJobStage === 'done' ? 'active' : '']">done</span>
+          </div>
+
+          <p
+            v-if="backupErrorMessage"
+            class="dialog-tip error"
+          >
+            {{ backupErrorMessage }}
+          </p>
+
+          <p
+            v-else-if="backupMessage"
+            class="dialog-tip success"
+          >
+            {{ backupMessage }}
+          </p>
+
+          <p
+            v-if="backupSnapshotPath"
+            class="dialog-tip muted"
+          >
+            输出目录：{{ backupSnapshotPath }}
+          </p>
+
+          <div
+            ref="backupTerminalRef"
+            class="publish-terminal"
+          >
+            <p
+              v-if="backupLogs.length === 0"
+              class="publish-terminal-empty"
+            >
+              点击“开始备份”后显示实时日志。
+            </p>
+            <p
+              v-for="log in backupLogs"
+              :key="log.id"
+              :class="['publish-log-line', `lv-${log.level}`]"
+            >
+              <span class="publish-log-time">{{ formatPublishLogTime(log.time) }}</span>
+              <span class="publish-log-text">{{ log.text }}</span>
+            </p>
+          </div>
+
+          <div class="dialog-actions">
+            <button
+              type="button"
+              class="dialog-action ghost"
+              :disabled="backupBusy"
+              @click="closeBackupDialog"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              class="dialog-action primary"
+              :disabled="backupBusy && backupJobStatus === 'running'"
+              @click="runBackup"
+            >
+              {{ backupPrimaryActionLabel }}
+            </button>
+          </div>
+        </section>
+      </div>
+    </Transition>
+
+    <Transition name="fade-content">
+      <div
+        v-if="typoraInstallDialogVisible"
+        class="dialog-overlay"
+        @click.self="closeTyporaInstallDialog"
+      >
+        <section class="dialog-card">
+          <button
+            type="button"
+            class="dialog-close"
+            aria-label="关闭弹窗"
+            @click="closeTyporaInstallDialog"
+          >
+            ×
+          </button>
+          <h3>未检测到 Typora</h3>
+          <p>{{ typoraInstallMessage }}</p>
+          <p class="dialog-tip muted">
+            {{ typoraInstallUrl }}
+          </p>
+
+          <div class="dialog-actions">
+            <button
+              type="button"
+              class="dialog-action ghost"
+              @click="closeTyporaInstallDialog"
+            >
+              稍后安装
+            </button>
+            <button
+              type="button"
+              class="dialog-action primary"
+              @click="openTyporaInstallPage"
+            >
+              前往安装
+            </button>
+          </div>
+        </section>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -688,13 +1112,21 @@ import {
   createArticleInSection,
   deleteArticleByPath,
   moveArticleToSection,
+  openArticleInTypora,
   saveArticleMarkdown,
+  TyporaNotInstalledError,
 } from "@/services/modules/editor";
 import {
   fetchArticleMarkdown,
   fetchContentTree,
   fetchHomeMarkdown,
 } from "@/services/modules/content";
+import {
+  BackupRunningError,
+  fetchBackupJob,
+  type BackupJobSnapshot,
+  startBackupDocumentRepo,
+} from "@/services/modules/backup";
 import {
   fetchPublishJob,
   type PublishJobSnapshot,
@@ -713,6 +1145,16 @@ const md = new MarkdownIt({
   typographer: true,
 });
 
+const defaultImageRenderer = md.renderer.rules.image
+  ?? ((tokens, index, options, _env, self) => self.renderToken(tokens, index, options));
+md.renderer.rules.image = (tokens, index, options, env, self) => {
+  const token = tokens[index];
+  if (token.attrIndex("referrerpolicy") < 0) {
+    token.attrSet("referrerpolicy", "no-referrer");
+  }
+  return defaultImageRenderer(tokens, index, options, env, self);
+};
+
 const tree = ref<ContentNode[]>([]);
 const openKeys = ref<Set<string>>(new Set());
 const renderedHtml = ref("");
@@ -725,6 +1167,7 @@ const menuErrorMessage = ref("");
 const editorErrorMessage = ref("");
 const editorSuccessMessage = ref("");
 const operationBusy = ref(false);
+const reloadBusy = ref(false);
 const editorDirty = ref(false);
 const viewMode = ref<"read" | "edit">("read");
 const originalFrontMatter = ref("");
@@ -741,6 +1184,7 @@ const createDialogFileName = ref("");
 const pathSettingsDialogVisible = ref(false);
 const pathSettingsDocumentProjectPath = ref("");
 const pathSettingsChainCodeRepoPath = ref("");
+const pathSettingsBackupRootPath = ref("");
 const pathSettingsErrorMessage = ref("");
 const settingsSaving = ref(false);
 const publishDialogVisible = ref(false);
@@ -754,12 +1198,32 @@ const publishLogs = ref<PublishJobSnapshot["logs"]>([]);
 const publishMessage = ref("");
 const publishCommitMessage = ref("");
 const publishTerminalRef = ref<HTMLElement | null>(null);
-const docsSourceDirLabel = ref("document/docs");
-const editorApiEnabled = import.meta.env.DEV;
+const backupDialogVisible = ref(false);
+const backupBusy = ref(false);
+const backupErrorMessage = ref("");
+const backupJobId = ref("");
+const backupJobStatus = ref<BackupJobSnapshot["status"] | "idle">("idle");
+const backupJobStage = ref<BackupJobSnapshot["stage"]>("init");
+const backupLogs = ref<BackupJobSnapshot["logs"]>([]);
+const backupMessage = ref("");
+const backupSnapshotPath = ref("");
+const backupTerminalRef = ref<HTMLElement | null>(null);
+const typoraOpening = ref(false);
+const typoraInstallDialogVisible = ref(false);
+const typoraInstallMessage = ref("");
+const typoraInstallUrl = ref("https://typora.io/#download");
+const docsSourceDirLabel = ref("content/docs");
+const editorApiEnabled = window.location.protocol.startsWith("http");
+
+type BarChipTone = "neutral" | "info" | "success" | "warning" | "danger";
+
+const moreActionsOpen = ref(false);
+const moreActionsRef = ref<HTMLElement | null>(null);
 
 let tocObserver: IntersectionObserver | null = null;
 let progressRafId = 0;
 let publishPollTimerId = 0;
+let backupPollTimerId = 0;
 let editorResizeRafId = 0;
 
 const currentArticlePath = computed(() =>
@@ -783,9 +1247,79 @@ const canEditCurrentArticle = computed(() => Boolean(currentArticlePath.value));
 const canSaveCurrentArticle = computed(
   () => isEditMode.value && canEditCurrentArticle.value && editorDirty.value && !operationBusy.value,
 );
-const editModeTooltip = computed(() =>
-  editorApiEnabled ? "编辑模式" : "编辑模式（仅 npm run dev 可用）",
+const canOpenInTypora = computed(
+  () =>
+    editorApiEnabled
+    && isEditMode.value
+    && canEditCurrentArticle.value
+    && !operationBusy.value
+    && !typoraOpening.value,
 );
+const isAnyTaskRunning = computed(
+  () =>
+    publishBusy.value
+    || backupBusy.value
+    || operationBusy.value
+    || reloadBusy.value
+    || typoraOpening.value,
+);
+const showEditActionGroup = computed(() => isEditMode.value);
+const canReloadAll = computed(() => !isAnyTaskRunning.value && !settingsSaving.value && !loading.value);
+const barEditStateLabel = computed(() => {
+  if (!isEditMode.value) {
+    return "只读";
+  }
+
+  if (editorDirty.value) {
+    return "未保存";
+  }
+
+  return "编辑";
+});
+const barEditStateTone = computed<BarChipTone>(() => {
+  if (!isEditMode.value) {
+    return "neutral";
+  }
+
+  return editorDirty.value ? "warning" : "info";
+});
+const barTaskStateLabel = computed(() => {
+  if (publishBusy.value) {
+    return "上传中";
+  }
+
+  if (backupBusy.value) {
+    return "备份中";
+  }
+
+  if (reloadBusy.value) {
+    return "重载中";
+  }
+
+  if (isAnyTaskRunning.value) {
+    return "处理中";
+  }
+
+  if (publishErrorMessage.value || backupErrorMessage.value) {
+    return "异常";
+  }
+
+  return "空闲";
+});
+const barTaskStateTone = computed<BarChipTone>(() => {
+  if (publishErrorMessage.value || backupErrorMessage.value) {
+    return "danger";
+  }
+
+  if (isAnyTaskRunning.value) {
+    return "info";
+  }
+
+  return "neutral";
+});
+const barEnvStateLabel = computed(() => (editorApiEnabled ? "桌面可用" : "环境受限"));
+const barEnvStateTone = computed<BarChipTone>(() => (editorApiEnabled ? "success" : "danger"));
+
 const resetActionTooltip = computed(() => {
   if (operationBusy.value) {
     return "处理中";
@@ -808,11 +1342,25 @@ const saveActionTooltip = computed(() => {
 
   return "保存修改";
 });
+const typoraActionTooltip = computed(() => {
+  if (!editorApiEnabled) {
+    return "当前环境不可用";
+  }
+
+  if (!canEditCurrentArticle.value) {
+    return "请先选择文章";
+  }
+
+  return typoraOpening.value ? "正在打开 Typora..." : "用 Typora 打开";
+});
 const pathSettingsTooltip = computed(() =>
-  editorApiEnabled ? "项目路径设置" : "项目路径设置（仅 npm run dev 可用）",
+  editorApiEnabled ? "仓库与备份路径设置" : "仓库路径设置（当前环境不可用）",
 );
 const publishTooltip = computed(() =>
-  editorApiEnabled ? "一键上传文档" : "一键上传（仅 npm run dev 可用）",
+  editorApiEnabled ? "一键上传文档" : "一键上传（当前环境不可用）",
+);
+const backupTooltip = computed(() =>
+  editorApiEnabled ? "一键备份文档仓库" : "一键备份（当前环境不可用）",
 );
 const publishPrimaryActionLabel = computed(() => {
   if (publishBusy.value) {
@@ -824,6 +1372,17 @@ const publishPrimaryActionLabel = computed(() => {
   }
 
   return "开始上传";
+});
+const backupPrimaryActionLabel = computed(() => {
+  if (backupBusy.value) {
+    return "备份中...";
+  }
+
+  if (backupJobStatus.value === "success") {
+    return "再次备份";
+  }
+
+  return "开始备份";
 });
 
 const isSearching = computed(() => searchKeyword.value.trim().length > 0);
@@ -876,6 +1435,7 @@ watch(
 onMounted(async () => {
   window.addEventListener("scroll", handleWindowScroll, { passive: true });
   window.addEventListener("resize", handleWindowScroll, { passive: true });
+  document.addEventListener("pointerdown", handleDocumentPointerDown);
   await loadPathSettings();
   await loadTree();
   await loadCurrentArticle();
@@ -885,7 +1445,9 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener("scroll", handleWindowScroll);
   window.removeEventListener("resize", handleWindowScroll);
+  document.removeEventListener("pointerdown", handleDocumentPointerDown);
   stopPublishPolling();
+  stopBackupPolling();
   if (editorResizeRafId) {
     cancelAnimationFrame(editorResizeRafId);
     editorResizeRafId = 0;
@@ -920,29 +1482,94 @@ watch(
 
 async function loadPathSettings() {
   if (!editorApiEnabled) {
-    return;
+    return true;
   }
 
   try {
     const settings = await fetchEditorPathSettings();
     pathSettingsDocumentProjectPath.value = settings.documentProjectPath;
     pathSettingsChainCodeRepoPath.value = settings.chainCodeRepoPath;
+    pathSettingsBackupRootPath.value = settings.backupRootPath;
     pathSettingsErrorMessage.value = "";
+    return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : "读取路径设置失败。";
     pathSettingsErrorMessage.value = message;
+    return false;
   }
 }
 
+function toggleMoreActions() {
+  moreActionsOpen.value = !moreActionsOpen.value;
+}
+
+function closeMoreActions() {
+  moreActionsOpen.value = false;
+}
+
+function handleMoreReset() {
+  closeMoreActions();
+  resetEditorContent();
+}
+
+function handleMoreTypora() {
+  closeMoreActions();
+  void openCurrentArticleInTypora();
+}
+
+function handleMoreReload() {
+  closeMoreActions();
+  void reloadAllArticles();
+}
+
+function handleMorePathSettings() {
+  closeMoreActions();
+  openPathSettingsDialog();
+}
+
+function handleMoreBackup() {
+  closeMoreActions();
+  openBackupDialog();
+}
+
+function handleMorePublish() {
+  closeMoreActions();
+  openPublishDialog();
+}
+
+function handleDocumentPointerDown(event: PointerEvent) {
+  if (!moreActionsOpen.value) {
+    return;
+  }
+
+  const target = event.target;
+  if (!(target instanceof Node)) {
+    closeMoreActions();
+    return;
+  }
+
+  if (moreActionsRef.value?.contains(target)) {
+    return;
+  }
+
+  closeMoreActions();
+}
+
 function openPathSettingsDialog() {
+  closeMoreActions();
+
   if (!editorApiEnabled) {
-    editorErrorMessage.value = "路径设置仅在本地开发环境可用，请使用 npm run dev 启动。";
+    editorErrorMessage.value = "当前环境不支持路径设置。";
     return;
   }
 
   pathSettingsDialogVisible.value = true;
   pathSettingsErrorMessage.value = "";
-  if (!pathSettingsDocumentProjectPath.value || !pathSettingsChainCodeRepoPath.value) {
+  if (
+    !pathSettingsDocumentProjectPath.value
+    || !pathSettingsChainCodeRepoPath.value
+    || !pathSettingsBackupRootPath.value
+  ) {
     void loadPathSettings();
   }
 }
@@ -953,8 +1580,10 @@ function closePathSettingsDialog() {
 }
 
 function openPublishDialog() {
+  closeMoreActions();
+
   if (!editorApiEnabled) {
-    editorErrorMessage.value = "一键上传仅在本地开发环境可用，请使用 npm run dev 启动。";
+    editorErrorMessage.value = "当前环境不支持一键上传。";
     return;
   }
 
@@ -966,6 +1595,27 @@ function openPublishDialog() {
   if (!pathSettingsDocumentProjectPath.value || !pathSettingsChainCodeRepoPath.value) {
     void loadPathSettings();
   }
+}
+
+function openBackupDialog() {
+  closeMoreActions();
+
+  backupDialogVisible.value = true;
+  backupErrorMessage.value = "";
+  backupMessage.value = "";
+  backupSnapshotPath.value = "";
+  if (!pathSettingsDocumentProjectPath.value || !pathSettingsBackupRootPath.value) {
+    void loadPathSettings();
+  }
+}
+
+function closeBackupDialog() {
+  if (backupBusy.value) {
+    return;
+  }
+
+  backupDialogVisible.value = false;
+  backupErrorMessage.value = "";
 }
 
 function closePublishDialog() {
@@ -1094,6 +1744,97 @@ function formatPublishLogTime(value: string) {
   return `${hour}:${minute}:${second}`;
 }
 
+async function runBackup() {
+  if (!editorApiEnabled || backupBusy.value) {
+    return;
+  }
+
+  backupBusy.value = true;
+  backupErrorMessage.value = "";
+  backupMessage.value = "";
+  backupSnapshotPath.value = "";
+  backupLogs.value = [];
+  backupJobStatus.value = "idle";
+  backupJobStage.value = "init";
+  editorErrorMessage.value = "";
+  editorSuccessMessage.value = "";
+
+  try {
+    const startResult = await startBackupDocumentRepo();
+    backupJobId.value = startResult.jobId;
+    startBackupPolling(startResult.jobId);
+  } catch (error) {
+    if (error instanceof BackupRunningError && error.jobId) {
+      backupJobId.value = error.jobId;
+      backupErrorMessage.value = error.message;
+      startBackupPolling(error.jobId);
+      return;
+    }
+
+    backupBusy.value = false;
+    const message = error instanceof Error ? error.message : "文档备份失败。";
+    backupErrorMessage.value = message;
+    editorErrorMessage.value = message;
+  }
+}
+
+function startBackupPolling(jobId: string) {
+  stopBackupPolling();
+  void syncBackupJob(jobId);
+  backupPollTimerId = window.setInterval(() => {
+    void syncBackupJob(jobId);
+  }, 700);
+}
+
+function stopBackupPolling() {
+  if (backupPollTimerId) {
+    window.clearInterval(backupPollTimerId);
+    backupPollTimerId = 0;
+  }
+}
+
+async function syncBackupJob(jobId: string) {
+  try {
+    const snapshot = await fetchBackupJob(jobId);
+    backupJobStatus.value = snapshot.status;
+    backupJobStage.value = snapshot.stage;
+    backupLogs.value = snapshot.logs ?? [];
+    backupMessage.value = snapshot.message ?? "";
+    backupSnapshotPath.value = snapshot.snapshotPath ?? "";
+
+    await nextTick();
+    scrollBackupTerminalToBottom();
+
+    if (snapshot.status !== "running") {
+      stopBackupPolling();
+      backupBusy.value = false;
+
+      if (snapshot.status === "success") {
+        editorSuccessMessage.value = snapshot.message ?? "文档备份完成。";
+      } else if (snapshot.status === "error") {
+        backupErrorMessage.value = snapshot.message ?? "备份任务执行失败。";
+        editorErrorMessage.value = backupErrorMessage.value;
+      }
+    } else {
+      backupBusy.value = true;
+    }
+  } catch (error) {
+    stopBackupPolling();
+    backupBusy.value = false;
+    const message = error instanceof Error ? error.message : "读取备份进度失败。";
+    backupErrorMessage.value = message;
+    editorErrorMessage.value = message;
+  }
+}
+
+function scrollBackupTerminalToBottom() {
+  const terminal = backupTerminalRef.value;
+  if (!terminal) {
+    return;
+  }
+  terminal.scrollTop = terminal.scrollHeight;
+}
+
 async function savePathSettings() {
   if (!editorApiEnabled || settingsSaving.value) {
     return;
@@ -1105,8 +1846,9 @@ async function savePathSettings() {
 
   const documentProjectPath = pathSettingsDocumentProjectPath.value.trim();
   const chainCodeRepoPath = pathSettingsChainCodeRepoPath.value.trim();
+  const backupRootPath = pathSettingsBackupRootPath.value.trim();
   if (!documentProjectPath || !chainCodeRepoPath) {
-    pathSettingsErrorMessage.value = "请填写完整路径。";
+    pathSettingsErrorMessage.value = "请填写内容仓库路径和部署仓库路径。";
     return;
   }
 
@@ -1119,9 +1861,11 @@ async function savePathSettings() {
     const saved = await saveEditorPathSettings({
       documentProjectPath,
       chainCodeRepoPath,
+      backupRootPath,
     });
     pathSettingsDocumentProjectPath.value = saved.documentProjectPath;
     pathSettingsChainCodeRepoPath.value = saved.chainCodeRepoPath;
+    pathSettingsBackupRootPath.value = saved.backupRootPath;
 
     await router.replace({
       name: "home",
@@ -1131,7 +1875,7 @@ async function savePathSettings() {
     await loadTree();
     await loadCurrentArticle();
     closePathSettingsDialog();
-    editorSuccessMessage.value = "项目路径已更新。";
+    editorSuccessMessage.value = "仓库与备份路径已更新。";
   } catch (error) {
     const message = error instanceof Error ? error.message : "保存路径设置失败。";
     pathSettingsErrorMessage.value = message;
@@ -1144,12 +1888,14 @@ async function loadTree() {
   try {
     const treeData = await fetchContentTree();
     tree.value = treeData.nodes;
-    docsSourceDirLabel.value = treeData.docsSourceDir || "document/docs";
+    docsSourceDirLabel.value = treeData.docsSourceDir || "content/docs";
     openKeys.value = collectDefaultOpenSectionKeys(treeData.nodes, currentArticlePath.value);
     menuErrorMessage.value = "";
+    return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to load sidebar tree";
     menuErrorMessage.value = message;
+    return false;
   }
 }
 
@@ -1170,7 +1916,7 @@ async function loadCurrentArticle() {
     editableMarkdownBody.value = parsed.body;
     originalLineEnding.value = detectLineEnding(rawContent);
     const { html, toc } = renderMarkdown(rawContent, isSpecialArticle.value);
-    renderedHtml.value = html;
+    renderedHtml.value = enhanceRenderedHtml(html);
     tocItems.value = toc;
     activeTocId.value = toc[0]?.id ?? "";
     editorDirty.value = false;
@@ -1186,6 +1932,7 @@ async function loadCurrentArticle() {
     if (anchorId) {
       scrollToAnchor(anchorId, false);
     }
+    return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to load markdown content";
     errorMessage.value = message;
@@ -1196,8 +1943,44 @@ async function loadCurrentArticle() {
     activeTocId.value = "";
     originalLineEnding.value = "\n";
     editorDirty.value = false;
+    return false;
   } finally {
     loading.value = false;
+  }
+}
+
+async function reloadAllArticles() {
+  closeMoreActions();
+
+  if (!canReloadAll.value) {
+    return;
+  }
+
+  if (!confirmDiscardUnsavedChanges()) {
+    return;
+  }
+
+  reloadBusy.value = true;
+  editorErrorMessage.value = "";
+  editorSuccessMessage.value = "";
+
+  try {
+    const pathLoaded = await loadPathSettings();
+    const treeLoaded = await loadTree();
+    const articleLoaded = await loadCurrentArticle();
+    updateReadingProgress();
+
+    if (pathLoaded && treeLoaded && articleLoaded) {
+      editorSuccessMessage.value = "已重新加载全部文章。";
+      return;
+    }
+
+    editorErrorMessage.value = "重新加载完成，但部分内容加载失败。";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "重新加载失败，请重试。";
+    editorErrorMessage.value = message;
+  } finally {
+    reloadBusy.value = false;
   }
 }
 
@@ -1267,6 +2050,13 @@ function renderSpecialMarkdown(content: string) {
     .map((section) => `<section class="special-column">${md.render(section)}</section>`)
     .join("");
   return `<div class="special-columns">${sectionsHtml}</div>`;
+}
+
+function enhanceRenderedHtml(html: string) {
+  return html.replace(
+    /<img\b(?![^>]*\breferrerpolicy=)([^>]*)>/gi,
+    (_match, attrs: string) => `<img${attrs} referrerpolicy="no-referrer">`,
+  );
 }
 
 function normalizeMarkdownForRender(content: string) {
@@ -1374,12 +2164,14 @@ function scrollToAnchor(anchorId: string, smooth: boolean) {
 }
 
 function setMode(mode: "read" | "edit") {
+  closeMoreActions();
+
   if (viewMode.value === mode) {
     return;
   }
 
   if (mode === "edit" && !editorApiEnabled) {
-    editorErrorMessage.value = "编辑模式仅在本地开发环境可用，请使用 npm run dev 启动。";
+    editorErrorMessage.value = "当前环境不支持编辑模式。";
     return;
   }
 
@@ -1480,6 +2272,41 @@ async function saveCurrentArticle() {
   } finally {
     operationBusy.value = false;
   }
+}
+
+async function openCurrentArticleInTypora() {
+  if (!canEditCurrentArticle.value || !currentArticlePath.value || typoraOpening.value) {
+    return;
+  }
+
+  typoraOpening.value = true;
+  editorErrorMessage.value = "";
+  editorSuccessMessage.value = "";
+
+  try {
+    const result = await openArticleInTypora(currentArticlePath.value);
+    editorSuccessMessage.value = result.message || "已在 Typora 打开当前文章。";
+  } catch (error) {
+    if (error instanceof TyporaNotInstalledError) {
+      typoraInstallMessage.value = error.message;
+      typoraInstallDialogVisible.value = true;
+      editorErrorMessage.value = "当前系统未检测到 Typora，请先安装。";
+    } else {
+      const message = error instanceof Error ? error.message : "打开 Typora 失败，请重试。";
+      editorErrorMessage.value = message;
+    }
+  } finally {
+    typoraOpening.value = false;
+  }
+}
+
+function closeTyporaInstallDialog() {
+  typoraInstallDialogVisible.value = false;
+}
+
+function openTyporaInstallPage() {
+  window.open(typoraInstallUrl.value, "_blank", "noopener,noreferrer");
+  closeTyporaInstallDialog();
 }
 
 function openCreateDialog(payload: { sectionPath: string; sectionTitle: string }) {
@@ -1643,6 +2470,8 @@ async function openHome() {
 }
 
 function closeDrawers() {
+  closeMoreActions();
+
   const menuToggle = document.getElementById("menu-control") as HTMLInputElement | null;
   const tocToggle = document.getElementById("toc-control") as HTMLInputElement | null;
 
@@ -1968,7 +2797,7 @@ function filterNodes(
   --radius-sm: 10px;
   --shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
   --reading-max-width: 92ch;
-  --mode-bar-height: 2.2rem;
+  --mode-bar-height: 2.95rem;
   --mode-bar-top-space: 0.55rem;
   --mode-bar-bottom-space: 0.55rem;
   --chrome-offset: calc(
@@ -2008,22 +2837,224 @@ function filterNodes(
 
 .mode-bar {
   max-width: 80rem;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: flex-end;
+  gap: 0.72rem;
   min-height: var(--mode-bar-height);
   margin: var(--mode-bar-top-space) auto var(--mode-bar-bottom-space);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fbfdff;
-  padding: 0.2rem 0.35rem;
+  border: 1px solid rgba(217, 226, 238, 0.9);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.1);
+  backdrop-filter: blur(10px);
+  padding: 0.28rem 0.48rem;
   pointer-events: auto;
 }
 
-.mode-icon-group {
+.mode-bar-left,
+.mode-bar-center,
+.mode-bar-right {
+  display: flex;
+  align-items: center;
+}
+
+.mode-bar-center {
+  justify-content: center;
+  min-width: 0;
+}
+
+.mode-bar-right {
+  justify-content: flex-end;
+  gap: 0.42rem;
+}
+
+.mode-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.16rem;
+  border: 1px solid #dbe4f1;
+  border-radius: 999px;
+  background: #f8fbff;
+  padding: 0.16rem;
+}
+
+.mode-segment-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: #5a677f;
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  min-height: 1.82rem;
+  padding: 0 0.62rem;
+  transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.mode-segment-button svg {
+  width: 0.92rem;
+  height: 0.92rem;
+}
+
+.mode-segment-button:hover {
+  background: #edf3ff;
+  color: #1f3d7a;
+}
+
+.mode-segment-button:active {
+  transform: scale(0.98);
+}
+
+.mode-segment-button.active {
+  border-color: rgba(59, 130, 246, 0.42);
+  background: #eaf2ff;
+  color: #1d4ed8;
+}
+
+.mode-segment-button:disabled {
+  color: #9aa6bb;
+  cursor: not-allowed;
+}
+
+.mode-segment-button:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.35);
+  outline-offset: 1px;
+}
+
+.status-chip-group {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.status-reload-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  border: 1px solid #c9daf7;
+  border-radius: 999px;
+  background: #edf3ff;
+  color: #1e4bb9;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  padding: 0.32rem 0.58rem;
+  transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.status-reload-button svg {
+  width: 0.84rem;
+  height: 0.84rem;
+}
+
+.status-reload-button svg.spinning {
+  animation: status-reload-spin 0.9s linear infinite;
+}
+
+.status-reload-button:hover {
+  border-color: #b6cdf7;
+  background: #e5efff;
+}
+
+.status-reload-button:active {
+  transform: scale(0.98);
+}
+
+.status-reload-button:disabled {
+  color: #96a2b7;
+  border-color: #dbe3ef;
+  background: #f8fafc;
+  cursor: not-allowed;
+}
+
+.status-reload-button:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.35);
+  outline-offset: 1px;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  border: 1px solid #dbe3ef;
+  border-radius: 999px;
+  background: #f8fafd;
+  color: #475467;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  padding: 0.32rem 0.56rem;
+}
+
+.status-chip-dot {
+  width: 0.38rem;
+  height: 0.38rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.85;
+}
+
+.status-chip.tone-neutral {
+  border-color: #dbe3ef;
+  background: #f8fafd;
+  color: #526079;
+}
+
+.status-chip.tone-info {
+  border-color: #bfd4ff;
+  background: #eaf2ff;
+  color: #2558c8;
+}
+
+.status-chip.tone-success {
+  border-color: #bce3cf;
+  background: #eefaf3;
+  color: #0f7a42;
+}
+
+.status-chip.tone-warning {
+  border-color: #f5d9ab;
+  background: #fff7e9;
+  color: #9a5f00;
+}
+
+.status-chip.tone-danger {
+  border-color: #f0c0c0;
+  background: #fff1f1;
+  color: #b42318;
+}
+
+@keyframes status-reload-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mode-action-cluster {
   display: inline-flex;
   align-items: center;
   gap: 0.34rem;
+  border: 1px solid #dbe4f1;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 0.17rem;
+}
+
+.mode-action-cluster-edit {
+  border-color: #d2e0f8;
+  background: #f9fbff;
 }
 
 .mode-icon-wrap {
@@ -2036,7 +3067,6 @@ function filterNodes(
   position: absolute;
   left: 50%;
   top: calc(100% + 0.42rem);
-  bottom: auto;
   transform: translate(-50%, -3px);
   border-radius: 7px;
   background: rgba(16, 24, 40, 0.92);
@@ -2051,7 +3081,8 @@ function filterNodes(
   z-index: 8;
 }
 
-.mode-icon-wrap:hover::after {
+.mode-icon-wrap:hover::after,
+.mode-icon-wrap:focus-within::after {
   opacity: 1;
   transform: translate(-50%, 0);
 }
@@ -2060,15 +3091,16 @@ function filterNodes(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.8rem;
-  height: 1.8rem;
+  width: 1.86rem;
+  height: 1.86rem;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 9px;
   background: #fff;
   color: #5d6b83;
   cursor: pointer;
   padding: 0;
-  transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease;
+  transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease,
+    transform 0.16s ease;
 }
 
 .mode-icon-button svg {
@@ -2078,6 +3110,10 @@ function filterNodes(
 
 .mode-icon-button:hover {
   background: #f4f7fd;
+}
+
+.mode-icon-button:active {
+  transform: scale(0.98);
 }
 
 .mode-icon-button.active {
@@ -2098,6 +3134,60 @@ function filterNodes(
   outline-offset: 2px;
 }
 
+.mode-more-wrap {
+  position: relative;
+  display: none;
+}
+
+.mode-more-toggle {
+  width: 1.86rem;
+}
+
+.mode-more-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.48rem);
+  min-width: 10.8rem;
+  border: 1px solid #d9e3ef;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.14);
+  display: grid;
+  gap: 0.16rem;
+  padding: 0.35rem;
+  z-index: 12;
+}
+
+.mode-more-item {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  padding: 0.42rem 0.5rem;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.mode-more-item:hover {
+  border-color: #dbe4f1;
+  background: #f6f9ff;
+  color: #1e3a8a;
+}
+
+.mode-more-item:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+}
+
+.mode-more-item:disabled {
+  color: #9aa6bb;
+  background: #f8fafc;
+  cursor: not-allowed;
+}
 .dialog-action {
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -2818,12 +3908,50 @@ input.toggle {
 }
 
 .dialog-card {
+  position: relative;
   width: min(28rem, 100%);
   border: 1px solid var(--border);
   border-radius: 14px;
   background: #fff;
   box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
   padding: 1rem;
+  padding-right: 2.8rem;
+}
+
+.dialog-close {
+  position: absolute;
+  top: 0.62rem;
+  right: 0.62rem;
+  width: 1.7rem;
+  height: 1.7rem;
+  border: 1px solid #d5dbe7;
+  border-radius: 999px;
+  background: #fff;
+  color: #475467;
+  font-size: 1.05rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.dialog-close:hover {
+  border-color: #9fb6dc;
+  background: #f2f6ff;
+  color: #1d4ed8;
+}
+
+.dialog-close:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+}
+
+.dialog-close:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .dialog-card h3 {
@@ -3038,9 +4166,53 @@ input.toggle {
     display: inline;
   }
 
+  .book-root {
+    --mode-bar-height: 5.25rem;
+    --mode-bar-top-space: 0.42rem;
+    --mode-bar-bottom-space: 0.46rem;
+  }
+
   .mode-bar {
-    padding: 0.18rem 0.28rem;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "left right"
+      "center center";
+    align-items: center;
+    gap: 0.48rem;
+    padding: 0.28rem 0.32rem;
     margin-bottom: 0.52rem;
+  }
+
+  .mode-bar-left {
+    grid-area: left;
+  }
+
+  .mode-bar-center {
+    grid-area: center;
+    justify-content: flex-start;
+  }
+
+  .mode-bar-right {
+    grid-area: right;
+    gap: 0.34rem;
+  }
+
+  .status-chip-group {
+    justify-content: flex-start;
+  }
+
+  .status-chip-env {
+    flex-basis: 100%;
+  }
+
+  .mode-action-cluster-edit,
+  .mode-action-cluster-repo,
+  .mobile-hidden-action {
+    display: none;
+  }
+
+  .mode-more-wrap {
+    display: inline-flex;
   }
 
   .book-menu {
@@ -3137,13 +4309,23 @@ input.toggle {
   }
 }
 
+@media (hover: none) {
+  .mode-icon-wrap::after {
+    display: none;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .book-menu-content,
   .book-toc-content,
   .book-page,
   .book-header aside,
   .book-search input,
+  .mode-segment-button,
   .mode-icon-button,
+  .status-reload-button,
+  .status-chip,
+  .mode-more-panel,
+  .mode-more-item,
   .dialog-action,
   .mode-icon-wrap::after,
   .reading-progress span,

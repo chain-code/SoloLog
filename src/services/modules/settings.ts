@@ -3,6 +3,7 @@ const SETTINGS_API_ROOT = "/api/editor/settings";
 export interface EditorPathSettings {
   documentProjectPath: string;
   chainCodeRepoPath: string;
+  backupRootPath: string;
   docsSourceDir?: string;
   homeIndexFile?: string;
 }
@@ -29,6 +30,7 @@ export async function fetchEditorPathSettings(): Promise<EditorPathSettings> {
 export async function saveEditorPathSettings(payload: {
   documentProjectPath: string;
   chainCodeRepoPath: string;
+  backupRootPath: string;
 }): Promise<EditorPathSettings> {
   const response = await fetch(SETTINGS_API_ROOT, {
     method: "PUT",

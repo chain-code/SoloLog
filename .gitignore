@@ -5,3 +5,6 @@ dist
 .npm-cache
 .idea
 public/content
+release
+src-tauri/target
+src-tauri/gen

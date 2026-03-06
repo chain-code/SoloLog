@@ -1,4 +1,4 @@
-import path from "node:path";
+﻿import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { promises as fs } from "node:fs";
 import { execFile, spawn } from "node:child_process";
@@ -20,16 +20,20 @@ const defaultDocumentProjectPath =
   );
 const defaultChainCodeRepoPath =
   process.env.CHAIN_CODE_REPO_PATH ?? "C:/Users/tianzhiwei/go/src/chain-code.github.io";
+const defaultBackupRootPath = process.env.BACKUP_ROOT_PATH ?? "";
+const TYPORA_DOWNLOAD_URL = "https://typora.io/#download";
 const execFileAsync = promisify(execFile);
 
 interface EditorPathSettings {
   documentProjectPath: string;
   chainCodeRepoPath: string;
+  backupRootPath: string;
 }
 
 let runtimePathSettings: EditorPathSettings = {
   documentProjectPath: defaultDocumentProjectPath,
   chainCodeRepoPath: defaultChainCodeRepoPath,
+  backupRootPath: defaultBackupRootPath,
 };
 
 type PublishJobStatus = "running" | "success" | "error" | "conflict";
@@ -55,8 +59,24 @@ interface PublishJob {
   commitMessage?: string;
 }
 
+type BackupJobStatus = "running" | "success" | "error";
+type BackupJobStage = "init" | "prepare" | "scan" | "copy" | "done";
+
+interface BackupJob {
+  id: string;
+  status: BackupJobStatus;
+  stage: BackupJobStage;
+  startedAt: string;
+  updatedAt: string;
+  logs: PublishLogEntry[];
+  message?: string;
+  snapshotPath?: string;
+}
+
 const publishJobs = new Map<string, PublishJob>();
 let activePublishJobId: string | null = null;
+const backupJobs = new Map<string, BackupJob>();
+let activeBackupJobId: string | null = null;
 let publishLogSequence = 1;
 
 const ARTICLE_TEMPLATE = [
@@ -119,12 +139,17 @@ async function loadPathSettingsFromDisk(): Promise<EditorPathSettings> {
         typeof parsed.chainCodeRepoPath === "string" && parsed.chainCodeRepoPath.trim()
           ? parsed.chainCodeRepoPath.trim()
           : defaultChainCodeRepoPath,
+      backupRootPath:
+        typeof parsed.backupRootPath === "string" && parsed.backupRootPath.trim()
+          ? parsed.backupRootPath.trim()
+          : defaultBackupRootPath,
     };
     return nextSettings;
   } catch {
     return {
       documentProjectPath: defaultDocumentProjectPath,
       chainCodeRepoPath: defaultChainCodeRepoPath,
+      backupRootPath: defaultBackupRootPath,
     };
   }
 }
@@ -136,6 +161,7 @@ async function savePathSettingsToDisk(settings: EditorPathSettings) {
 function normalizePathSettingsPayload(payload: Record<string, unknown>): EditorPathSettings {
   const documentProjectPath = toRequiredString(payload.documentProjectPath, "documentProjectPath").trim();
   const chainCodeRepoPath = toRequiredString(payload.chainCodeRepoPath, "chainCodeRepoPath").trim();
+  const backupRootPath = toOptionalString(payload.backupRootPath).trim();
 
   if (!documentProjectPath) {
     throw new ApiError(400, "documentProjectPath is required.");
@@ -147,22 +173,30 @@ function normalizePathSettingsPayload(payload: Record<string, unknown>): EditorP
   return {
     documentProjectPath,
     chainCodeRepoPath,
+    backupRootPath,
   };
 }
 
 async function assertPathSettingsValid(settings: EditorPathSettings) {
   const runtimePaths = resolveRuntimeContentPaths(settings);
-  await assertDirectoryExists(runtimePaths.documentProjectPath, "Document project path");
-  await assertDirectoryExists(runtimePaths.docsSourceDir, "Document docs path");
-  await assertFileExists(runtimePaths.homeIndexFile, "Document home _index.md");
-  await assertDirectoryExists(runtimePaths.chainCodeRepoPath, "chain-code.github.io path");
+  await assertDirectoryExists(runtimePaths.documentProjectPath, "Content repository path");
+  await assertDirectoryExists(runtimePaths.docsSourceDir, "Content docs path");
+  await assertFileExists(runtimePaths.homeIndexFile, "Content home _index.md");
+  await assertDirectoryExists(runtimePaths.chainCodeRepoPath, "Deploy repository path");
+  if (settings.backupRootPath.trim()) {
+    await ensureDirectoryExists(path.resolve(settings.backupRootPath), "Backup root path");
+  }
 }
 
 function toPathSettingsResponse(settings: EditorPathSettings) {
   const runtimePaths = resolveRuntimeContentPaths(settings);
+  const backupRootPath = settings.backupRootPath.trim()
+    ? path.resolve(settings.backupRootPath.trim())
+    : "";
   return {
     documentProjectPath: runtimePaths.documentProjectPath,
     chainCodeRepoPath: runtimePaths.chainCodeRepoPath,
+    backupRootPath,
     docsSourceDir: runtimePaths.docsSourceDir,
     homeIndexFile: runtimePaths.homeIndexFile,
   };
@@ -259,6 +293,62 @@ function createEditorApiPlugin() {
               }
 
               sendJson(response, 200, toPublishJobResponse(job));
+              return;
+            }
+
+            if (method === "POST" && pathname === "/api/editor/backup") {
+              if (activeBackupJobId) {
+                sendJson(response, 409, {
+                  status: "running",
+                  message: "已有备份任务正在执行。",
+                  jobId: activeBackupJobId,
+                });
+                return;
+              }
+
+              const job = createBackupJob();
+              activeBackupJobId = job.id;
+              void executeBackupJob(job).finally(() => {
+                if (activeBackupJobId === job.id) {
+                  activeBackupJobId = null;
+                }
+              });
+
+              sendJson(response, 202, {
+                status: "running",
+                jobId: job.id,
+              });
+              return;
+            }
+
+            if (method === "GET" && pathname.startsWith("/api/editor/backup/")) {
+              const jobId = pathname.slice("/api/editor/backup/".length).trim();
+              if (!jobId) {
+                throw new ApiError(400, "jobId is required.");
+              }
+
+              const job = backupJobs.get(jobId);
+              if (!job) {
+                throw new ApiError(404, "Backup job not found.");
+              }
+
+              sendJson(response, 200, toBackupJobResponse(job));
+              return;
+            }
+
+            if (method === "POST" && pathname === "/api/editor/typora/open") {
+              const payload = await readJsonBody(request);
+              const articlePath = toSafeRelativePath(payload.articlePath, "articlePath");
+              assertMarkdownArticlePath(articlePath);
+
+              const articleAbsPath = resolveDocsPath(articlePath);
+              await assertFileExists(articleAbsPath, "Article");
+              await openArticleInTyporaExternal(articleAbsPath);
+
+              sendJson(response, 200, {
+                ok: true,
+                message: `宸插湪 Typora 鎵撳紑锛?{articlePath}`,
+              });
               return;
             }
 
@@ -402,6 +492,13 @@ function toRequiredString(value: unknown, fieldName: string) {
     throw new ApiError(400, `${fieldName} is required.`);
   }
 
+  return value;
+}
+
+function toOptionalString(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
   return value;
 }
 
@@ -607,6 +704,413 @@ async function executePublishJob(job: PublishJob) {
   }
 }
 
+function createBackupJob(): BackupJob {
+  const now = new Date().toISOString();
+  const job: BackupJob = {
+    id: `backup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    status: "running",
+    stage: "init",
+    startedAt: now,
+    updatedAt: now,
+    logs: [],
+  };
+  backupJobs.set(job.id, job);
+  cleanupBackupJobs();
+  appendBackupLog(job, "info", "开始执行内容仓库备份任务。");
+  return job;
+}
+
+function toBackupJobResponse(job: BackupJob) {
+  return {
+    id: job.id,
+    status: job.status,
+    stage: job.stage,
+    startedAt: job.startedAt,
+    updatedAt: job.updatedAt,
+    logs: job.logs,
+    message: job.message,
+    snapshotPath: job.snapshotPath,
+  };
+}
+
+function appendBackupLog(job: BackupJob, level: PublishLogLevel, text: string) {
+  const entry: PublishLogEntry = {
+    id: publishLogSequence++,
+    time: new Date().toISOString(),
+    level,
+    text,
+  };
+  job.logs.push(entry);
+  if (job.logs.length > 600) {
+    job.logs.splice(0, job.logs.length - 600);
+  }
+  job.updatedAt = entry.time;
+}
+
+function updateBackupJob(job: BackupJob, patch: Partial<BackupJob>) {
+  Object.assign(job, patch);
+  job.updatedAt = new Date().toISOString();
+}
+
+function cleanupBackupJobs() {
+  if (backupJobs.size <= 30) {
+    return;
+  }
+
+  const sorted = [...backupJobs.values()].sort((left, right) =>
+    left.startedAt.localeCompare(right.startedAt),
+  );
+  const removable = sorted.filter((job) => job.status !== "running").slice(
+    0,
+    Math.max(0, sorted.length - 30),
+  );
+  removable.forEach((job) => backupJobs.delete(job.id));
+}
+
+async function executeBackupJob(job: BackupJob) {
+  try {
+    const runtimePaths = resolveRuntimeContentPaths();
+    const sourceRepoPath = runtimePaths.documentProjectPath;
+    const backupRootPath = resolveBackupRootPath();
+
+    updateBackupJob(job, { stage: "prepare" });
+    await assertDirectoryExists(sourceRepoPath, "Content repository path");
+    await ensureDirectoryExists(backupRootPath, "Backup root path");
+    appendBackupLog(job, "info", `源仓库：${sourceRepoPath}`);
+    appendBackupLog(job, "info", `备份根路径：${backupRootPath}`);
+
+    const snapshotFolderName = formatBackupFolderTimestamp();
+    let snapshotPath = path.resolve(backupRootPath, snapshotFolderName);
+    if (await exists(snapshotPath)) {
+      let suffix = 1;
+      while (await exists(path.resolve(backupRootPath, `${snapshotFolderName}-${String(suffix).padStart(2, "0")}`))) {
+        suffix += 1;
+      }
+      snapshotPath = path.resolve(backupRootPath, `${snapshotFolderName}-${String(suffix).padStart(2, "0")}`);
+    }
+    await ensureDirectoryExists(snapshotPath, "Backup snapshot directory");
+    appendBackupLog(job, "success", `已创建备份目录：${snapshotPath}`);
+
+    updateBackupJob(job, { stage: "scan" });
+    const scanResult = await collectBackupItems(sourceRepoPath);
+    appendBackupLog(
+      job,
+      "info",
+      `扫描完成：${scanResult.directoryCount} 个目录，${scanResult.fileCount} 个文件，总大小约 ${scanResult.totalBytes} 字节。`,
+    );
+
+    updateBackupJob(job, { stage: "copy" });
+    let copiedFiles = 0;
+    let copiedBytes = 0;
+    for (const item of scanResult.items) {
+      const destinationPath = path.resolve(snapshotPath, item.relativePath);
+      if (item.isDirectory) {
+        await ensureDirectoryExists(destinationPath, "Backup directory");
+        continue;
+      }
+
+      await ensureDirectoryExists(path.dirname(destinationPath), "Backup parent directory");
+      await fs.copyFile(item.sourcePath, destinationPath);
+      copiedFiles += 1;
+      copiedBytes += item.size;
+
+      if (copiedFiles === 1 || copiedFiles % 25 === 0 || copiedFiles === scanResult.fileCount) {
+        appendBackupLog(
+          job,
+          "stdout",
+          `已复制 ${copiedFiles}/${scanResult.fileCount} 个文件（${copiedBytes} 字节）。`,
+        );
+      }
+    }
+
+    updateBackupJob(job, {
+      status: "success",
+      stage: "done",
+      message: "备份完成。",
+      snapshotPath,
+    });
+    appendBackupLog(
+      job,
+      "success",
+      `备份完成：${copiedFiles} 个文件，${copiedBytes} 字节。输出目录：${snapshotPath}`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "备份任务执行失败。";
+    updateBackupJob(job, {
+      status: "error",
+      stage: "done",
+      message,
+    });
+    appendBackupLog(job, "error", message);
+  }
+}
+
+interface BackupCopyItem {
+  sourcePath: string;
+  relativePath: string;
+  isDirectory: boolean;
+  size: number;
+}
+
+async function collectBackupItems(sourceRootPath: string) {
+  const items: BackupCopyItem[] = [];
+  let fileCount = 0;
+  let directoryCount = 0;
+  let totalBytes = 0;
+
+  async function walk(currentAbsolutePath: string, relativeBase = ""): Promise<void> {
+    const entries = await fs.readdir(currentAbsolutePath, { withFileTypes: true });
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+
+    for (const entry of entries) {
+      const entryAbsolutePath = path.resolve(currentAbsolutePath, entry.name);
+      const entryRelativePath = relativeBase
+        ? path.posix.join(relativeBase, entry.name)
+        : entry.name;
+
+      if (entry.isDirectory()) {
+        directoryCount += 1;
+        items.push({
+          sourcePath: entryAbsolutePath,
+          relativePath: entryRelativePath,
+          isDirectory: true,
+          size: 0,
+        });
+        await walk(entryAbsolutePath, entryRelativePath);
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const stat = await fs.stat(entryAbsolutePath);
+      const size = stat.size ?? 0;
+      fileCount += 1;
+      totalBytes += size;
+      items.push({
+        sourcePath: entryAbsolutePath,
+        relativePath: entryRelativePath,
+        isDirectory: false,
+        size,
+      });
+    }
+  }
+
+  await walk(sourceRootPath);
+  return { items, fileCount, directoryCount, totalBytes };
+}
+
+function resolveBackupRootPath() {
+  const backupRootPath = runtimePathSettings.backupRootPath.trim();
+  if (!backupRootPath) {
+    throw new ApiError(400, "Backup root path is not configured. Please set it in settings first.");
+  }
+  return path.resolve(backupRootPath);
+}
+
+function formatBackupFolderTimestamp() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const hour = String(now.getHours()).padStart(2, "0");
+  const minute = String(now.getMinutes()).padStart(2, "0");
+  const second = String(now.getSeconds()).padStart(2, "0");
+  return `${year}年${month}月${day}日${hour}时${minute}分${second}秒-备份`;
+}
+
+async function openArticleInTyporaExternal(articleAbsolutePath: string) {
+  if (process.platform === "win32") {
+    const launchErrors: string[] = [];
+    const candidates = await collectWindowsTyporaCandidates();
+    for (const candidate of candidates) {
+      if (!(await isFile(candidate))) {
+        continue;
+      }
+      try {
+        await spawnDetachedProcess(candidate, [articleAbsolutePath]);
+        return;
+      } catch (error) {
+        launchErrors.push(`${candidate}: ${formatUnknownError(error)}`);
+      }
+    }
+
+    try {
+      await spawnDetachedProcess("typora.exe", [articleAbsolutePath]);
+      return;
+    } catch (error) {
+      if (!isCommandNotFoundError(error)) {
+        launchErrors.push(`typora.exe: ${formatUnknownError(error)}`);
+      }
+    }
+
+    try {
+      await launchTyporaViaCmdStart(articleAbsolutePath);
+      return;
+    } catch (error) {
+      launchErrors.push(`cmd-start: ${formatUnknownError(error)}`);
+    }
+
+    if (launchErrors.length > 0) {
+      throw new ApiError(500, `Failed to launch Typora: ${launchErrors.join(" | ")}`);
+    }
+    throw new ApiError(412, `未检测到 Typora，请先安装：${TYPORA_DOWNLOAD_URL}`);
+  }
+
+  if (process.platform === "darwin") {
+    try {
+      await spawnDetachedProcess("open", ["-a", "Typora", articleAbsolutePath]);
+      return;
+    } catch (error) {
+      if (isCommandNotFoundError(error)) {
+        throw new ApiError(412, `未检测到 Typora，请先安装：${TYPORA_DOWNLOAD_URL}`);
+      }
+      throw new ApiError(500, `Failed to launch Typora: ${formatUnknownError(error)}`);
+    }
+  }
+
+  try {
+    await spawnDetachedProcess("typora", [articleAbsolutePath]);
+  } catch (error) {
+    if (isCommandNotFoundError(error)) {
+      throw new ApiError(412, `未检测到 Typora，请先安装：${TYPORA_DOWNLOAD_URL}`);
+    }
+    throw new ApiError(500, `Failed to launch Typora: ${formatUnknownError(error)}`);
+  }
+}
+
+async function collectWindowsTyporaCandidates() {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const pushCandidate = (candidate: string) => {
+    const trimmed = candidate.trim().replace(/^"+|"+$/g, "");
+    if (!trimmed) {
+      return;
+    }
+    const dedupeKey = trimmed.toLowerCase();
+    if (seen.has(dedupeKey)) {
+      return;
+    }
+    seen.add(dedupeKey);
+    candidates.push(trimmed);
+  };
+
+  if (process.env.LOCALAPPDATA) {
+    pushCandidate(path.join(process.env.LOCALAPPDATA, "Programs", "Typora", "Typora.exe"));
+    pushCandidate(path.join(process.env.LOCALAPPDATA, "Typora", "Typora.exe"));
+  }
+  if (process.env.USERPROFILE) {
+    pushCandidate(path.join(process.env.USERPROFILE, "AppData", "Local", "Programs", "Typora", "Typora.exe"));
+    pushCandidate(path.join(process.env.USERPROFILE, "AppData", "Local", "Typora", "Typora.exe"));
+  }
+  if (process.env.ProgramFiles) {
+    pushCandidate(path.join(process.env.ProgramFiles, "Typora", "Typora.exe"));
+  }
+  if (process.env["ProgramFiles(x86)"]) {
+    pushCandidate(path.join(process.env["ProgramFiles(x86)"], "Typora", "Typora.exe"));
+  }
+
+  for (const wherePath of await queryTyporaPathFromWhere()) {
+    pushCandidate(wherePath);
+  }
+  for (const registryPath of await queryTyporaPathFromRegistry()) {
+    pushCandidate(registryPath);
+  }
+
+  return candidates;
+}
+
+async function queryTyporaPathFromWhere() {
+  try {
+    const { stdout } = await execFileAsync("where.exe", ["typora.exe"], {
+      windowsHide: true,
+      env: process.env,
+    });
+    return stdout
+      .toString()
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function queryTyporaPathFromRegistry() {
+  const keys = [
+    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\Typora.exe",
+    "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\Typora.exe",
+    "HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\Typora.exe",
+  ];
+
+  const results: string[] = [];
+  for (const key of keys) {
+    try {
+      const { stdout } = await execFileAsync("reg", ["query", key, "/ve"], {
+        windowsHide: true,
+        env: process.env,
+      });
+      for (const line of stdout.toString().split(/\r?\n/)) {
+        const index = line.indexOf("REG_SZ");
+        if (index < 0) {
+          continue;
+        }
+        const value = line
+          .slice(index + "REG_SZ".length)
+          .trim()
+          .replace(/^"+|"+$/g, "");
+        if (value) {
+          results.push(value);
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return results;
+}
+
+async function spawnDetachedProcess(command: string, args: string[]) {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+      shell: false,
+    });
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
+async function launchTyporaViaCmdStart(articleAbsolutePath: string) {
+  await execFileAsync(
+    "cmd.exe",
+    ["/d", "/s", "/c", "start", "", "typora.exe", articleAbsolutePath],
+    {
+      windowsHide: true,
+      env: process.env,
+    },
+  );
+}
+
+function isCommandNotFoundError(error: unknown) {
+  const maybeError = error as NodeJS.ErrnoException;
+  return maybeError?.code === "ENOENT";
+}
+
+function formatUnknownError(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
 function resolveUnderRoot(rootPath: string, relativePath: string) {
   const absolutePath = path.resolve(rootPath, relativePath);
   const normalizedRoot = path.normalize(rootPath).toLowerCase();
@@ -631,6 +1135,11 @@ async function assertDirectoryExists(targetPath: string, label: string) {
   if (!stats.isDirectory()) {
     throw new ApiError(400, `${label} is not a directory.`);
   }
+}
+
+async function ensureDirectoryExists(targetPath: string, label: string) {
+  await fs.mkdir(targetPath, { recursive: true });
+  await assertDirectoryExists(targetPath, label);
 }
 
 async function assertFileExists(targetPath: string, label: string) {
@@ -772,7 +1281,7 @@ async function runGitCommandWithLogs(
 async function assertGitRepository(repositoryPath: string) {
   const result = await runGitCommand(["rev-parse", "--is-inside-work-tree"], repositoryPath);
   if (!result.ok || result.stdout !== "true") {
-    throw new ApiError(400, "Document 项目路径不是有效的 git 仓库。");
+    throw new ApiError(400, "内容仓库路径不是有效的 git 仓库。");
   }
 }
 
@@ -877,3 +1386,5 @@ export default defineConfig({
     port: 5173,
   },
 });
+
+

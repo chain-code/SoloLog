@@ -8,7 +8,10 @@
     "dev": "npm run prepare:content && vite",
     "build": "npm run prepare:content && vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext .ts,.vue"
+    "lint": "eslint . --ext .ts,.vue",
+    "tauri:dev": "npm run build && node scripts/run-tauri.mjs dev",
+    "pack:win": "npm run build && node scripts/run-tauri.mjs build --bundles nsis --target x86_64-pc-windows-msvc",
+    "pack:mac": "npm run build && node scripts/run-tauri.mjs build --bundles dmg --target aarch64-apple-darwin"
   },
   "dependencies": {
     "axios": "^1.8.4",
@@ -19,6 +22,7 @@
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
     "@types/node": "^22.13.10",
     "@typescript-eslint/eslint-plugin": "^8.26.1",
     "@typescript-eslint/parser": "^8.26.1",
@@ -30,5 +34,8 @@
     "typescript": "~5.7.2",
     "vite": "^6.2.0",
     "vue-tsc": "^2.2.8"
-  }
+  },
+  "description": "SoloLog desktop client powered by Vue and Tauri",
+  "author": "chain-code"
 }
+
