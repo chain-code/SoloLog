@@ -11,7 +11,7 @@
     "lint": "eslint . --ext .ts,.vue",
     "tauri:dev": "npm run build && node scripts/run-tauri.mjs dev",
     "pack:win": "npm run build && node scripts/run-tauri.mjs build --bundles nsis --target x86_64-pc-windows-msvc",
-    "pack:mac": "npm run build && node scripts/run-tauri.mjs build --bundles dmg --target aarch64-apple-darwin"
+    "pack:mac": "node scripts/pack-mac.mjs"
   },
   "dependencies": {
     "axios": "^1.8.4",
@@ -38,4 +38,3 @@
   "description": "SoloLog desktop client powered by Vue and Tauri",
   "author": "chain-code"
 }
-

@@ -4,6 +4,7 @@ export interface EditorPathSettings {
   documentProjectPath: string;
   chainCodeRepoPath: string;
   backupRootPath: string;
+  hugoProjectPath: string;
   docsSourceDir?: string;
   homeIndexFile?: string;
 }
@@ -31,6 +32,7 @@ export async function saveEditorPathSettings(payload: {
   documentProjectPath: string;
   chainCodeRepoPath: string;
   backupRootPath: string;
+  hugoProjectPath: string;
 }): Promise<EditorPathSettings> {
   const response = await fetch(SETTINGS_API_ROOT, {
     method: "PUT",

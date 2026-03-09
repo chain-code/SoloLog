@@ -376,6 +376,45 @@
                 </svg>
               </button>
             </span>
+
+            <span
+              class="mode-icon-wrap mobile-hidden-action"
+              :data-tip="deployTooltip"
+            >
+              <button
+                type="button"
+                class="mode-icon-button"
+                :disabled="!editorApiEnabled || operationBusy || settingsSaving || deployBusy"
+                aria-label="一键发布站点"
+                @click="openDeployDialog"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M5.5 18.5h13"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M8.5 15 12 5.5 15.5 15"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M7 11.8h10"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+            </span>
           </div>
 
           <div
@@ -475,6 +514,14 @@
                   @click="handleMorePublish"
                 >
                   一键上传
+                </button>
+                <button
+                  type="button"
+                  class="mode-more-item"
+                  :disabled="!editorApiEnabled || operationBusy || settingsSaving || deployBusy"
+                  @click="handleMoreDeploy"
+                >
+                  一键发布
                 </button>
               </div>
             </Transition>
@@ -795,7 +842,7 @@
           >
             ×
           </button>
-          <h3>仓库与备份路径设置</h3>
+          <h3>仓库、发布与备份路径设置</h3>
           <p>请填写本机绝对路径，目录名可自定义，不要求必须叫 document 或 chain-code.github.io。</p>
 
           <label class="dialog-label">
@@ -813,6 +860,15 @@
               v-model.trim="pathSettingsChainCodeRepoPath"
               type="text"
               placeholder="例如：D:/workspace/blog-deploy"
+            >
+          </label>
+
+          <label class="dialog-label">
+            Hugo 项目路径（用于一键发布）
+            <input
+              v-model.trim="pathSettingsHugoProjectPath"
+              type="text"
+              placeholder="例如：D:/workspace/blog-hugo"
             >
           </label>
 
@@ -958,6 +1014,102 @@
               @click="runPublish"
             >
               {{ publishPrimaryActionLabel }}
+            </button>
+          </div>
+        </section>
+      </div>
+    </Transition>
+
+    <Transition name="fade-content">
+      <div
+        v-if="deployDialogVisible"
+        class="dialog-overlay"
+        @click.self="closeDeployDialog"
+      >
+        <section class="dialog-card">
+          <button
+            type="button"
+            class="dialog-close"
+            aria-label="关闭弹窗"
+            :disabled="deployBusy"
+            @click="closeDeployDialog"
+          >
+            ×
+          </button>
+          <h3>一键发布站点</h3>
+          <p>按顺序执行 hugo（目录A）→ git add . → git commit → git push（目录B），并实时显示命令行输出。</p>
+
+          <p class="dialog-tip muted">
+            Hugo 目录：{{ pathSettingsHugoProjectPath || "未设置" }}
+          </p>
+          <p class="dialog-tip muted">
+            部署仓库：{{ pathSettingsChainCodeRepoPath || "未设置" }}
+          </p>
+
+          <div class="publish-steps">
+            <span :class="['publish-step', ['hugo', 'add', 'commit', 'push', 'done'].includes(deployJobStage) ? 'active' : '']">hugo</span>
+            <span :class="['publish-step', ['add', 'commit', 'push', 'done'].includes(deployJobStage) ? 'active' : '']">add</span>
+            <span :class="['publish-step', ['commit', 'push', 'done'].includes(deployJobStage) ? 'active' : '']">commit</span>
+            <span :class="['publish-step', ['push', 'done'].includes(deployJobStage) ? 'active' : '']">push</span>
+          </div>
+
+          <p
+            v-if="deployErrorMessage"
+            class="dialog-tip error"
+          >
+            {{ deployErrorMessage }}
+          </p>
+
+          <p
+            v-else-if="deployMessage"
+            class="dialog-tip success"
+          >
+            {{ deployMessage }}
+          </p>
+
+          <p
+            v-if="deployCommitMessage"
+            class="dialog-tip muted"
+          >
+            Commit: {{ deployCommitMessage }}
+          </p>
+
+          <div
+            ref="deployTerminalRef"
+            class="publish-terminal"
+          >
+            <p
+              v-if="deployLogs.length === 0"
+              class="publish-terminal-empty"
+            >
+              点击“开始发布”后显示实时日志。
+            </p>
+            <p
+              v-for="log in deployLogs"
+              :key="log.id"
+              :class="['publish-log-line', `lv-${log.level}`]"
+            >
+              <span class="publish-log-time">{{ formatPublishLogTime(log.time) }}</span>
+              <span class="publish-log-text">{{ log.text }}</span>
+            </p>
+          </div>
+
+          <div class="dialog-actions">
+            <button
+              type="button"
+              class="dialog-action ghost"
+              :disabled="deployBusy"
+              @click="closeDeployDialog"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              class="dialog-action primary"
+              :disabled="deployBusy && deployJobStatus === 'running'"
+              @click="runDeploy"
+            >
+              {{ deployPrimaryActionLabel }}
             </button>
           </div>
         </section>
@@ -1133,6 +1285,12 @@ import {
   startPublishDocumentRepo,
   PublishRunningError,
 } from "@/services/modules/publish";
+import {
+  DeployRunningError,
+  fetchDeployJob,
+  type DeployJobSnapshot,
+  startDeploySite,
+} from "@/services/modules/deploy";
 import { fetchEditorPathSettings, saveEditorPathSettings } from "@/services/modules/settings";
 import type { ContentNode } from "@/types/content";
 import type { TocItem } from "@/types/toc";
@@ -1185,6 +1343,7 @@ const pathSettingsDialogVisible = ref(false);
 const pathSettingsDocumentProjectPath = ref("");
 const pathSettingsChainCodeRepoPath = ref("");
 const pathSettingsBackupRootPath = ref("");
+const pathSettingsHugoProjectPath = ref("");
 const pathSettingsErrorMessage = ref("");
 const settingsSaving = ref(false);
 const publishDialogVisible = ref(false);
@@ -1198,6 +1357,16 @@ const publishLogs = ref<PublishJobSnapshot["logs"]>([]);
 const publishMessage = ref("");
 const publishCommitMessage = ref("");
 const publishTerminalRef = ref<HTMLElement | null>(null);
+const deployDialogVisible = ref(false);
+const deployBusy = ref(false);
+const deployErrorMessage = ref("");
+const deployJobId = ref("");
+const deployJobStatus = ref<DeployJobSnapshot["status"] | "idle">("idle");
+const deployJobStage = ref<DeployJobSnapshot["stage"]>("init");
+const deployLogs = ref<DeployJobSnapshot["logs"]>([]);
+const deployMessage = ref("");
+const deployCommitMessage = ref("");
+const deployTerminalRef = ref<HTMLElement | null>(null);
 const backupDialogVisible = ref(false);
 const backupBusy = ref(false);
 const backupErrorMessage = ref("");
@@ -1223,6 +1392,7 @@ const moreActionsRef = ref<HTMLElement | null>(null);
 let tocObserver: IntersectionObserver | null = null;
 let progressRafId = 0;
 let publishPollTimerId = 0;
+let deployPollTimerId = 0;
 let backupPollTimerId = 0;
 let editorResizeRafId = 0;
 
@@ -1258,6 +1428,7 @@ const canOpenInTypora = computed(
 const isAnyTaskRunning = computed(
   () =>
     publishBusy.value
+    || deployBusy.value
     || backupBusy.value
     || operationBusy.value
     || reloadBusy.value
@@ -1288,6 +1459,10 @@ const barTaskStateLabel = computed(() => {
     return "上传中";
   }
 
+  if (deployBusy.value) {
+    return "发布中";
+  }
+
   if (backupBusy.value) {
     return "备份中";
   }
@@ -1300,14 +1475,14 @@ const barTaskStateLabel = computed(() => {
     return "处理中";
   }
 
-  if (publishErrorMessage.value || backupErrorMessage.value) {
+  if (publishErrorMessage.value || deployErrorMessage.value || backupErrorMessage.value) {
     return "异常";
   }
 
   return "空闲";
 });
 const barTaskStateTone = computed<BarChipTone>(() => {
-  if (publishErrorMessage.value || backupErrorMessage.value) {
+  if (publishErrorMessage.value || deployErrorMessage.value || backupErrorMessage.value) {
     return "danger";
   }
 
@@ -1354,10 +1529,13 @@ const typoraActionTooltip = computed(() => {
   return typoraOpening.value ? "正在打开 Typora..." : "用 Typora 打开";
 });
 const pathSettingsTooltip = computed(() =>
-  editorApiEnabled ? "仓库与备份路径设置" : "仓库路径设置（当前环境不可用）",
+  editorApiEnabled ? "仓库、发布与备份路径设置" : "仓库路径设置（当前环境不可用）",
 );
 const publishTooltip = computed(() =>
   editorApiEnabled ? "一键上传文档" : "一键上传（当前环境不可用）",
+);
+const deployTooltip = computed(() =>
+  editorApiEnabled ? "一键发布站点" : "一键发布（当前环境不可用）",
 );
 const backupTooltip = computed(() =>
   editorApiEnabled ? "一键备份文档仓库" : "一键备份（当前环境不可用）",
@@ -1372,6 +1550,17 @@ const publishPrimaryActionLabel = computed(() => {
   }
 
   return "开始上传";
+});
+const deployPrimaryActionLabel = computed(() => {
+  if (deployBusy.value) {
+    return "执行中...";
+  }
+
+  if (deployJobStatus.value === "success") {
+    return "再次发布";
+  }
+
+  return "开始发布";
 });
 const backupPrimaryActionLabel = computed(() => {
   if (backupBusy.value) {
@@ -1447,6 +1636,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", handleWindowScroll);
   document.removeEventListener("pointerdown", handleDocumentPointerDown);
   stopPublishPolling();
+  stopDeployPolling();
   stopBackupPolling();
   if (editorResizeRafId) {
     cancelAnimationFrame(editorResizeRafId);
@@ -1490,6 +1680,7 @@ async function loadPathSettings() {
     pathSettingsDocumentProjectPath.value = settings.documentProjectPath;
     pathSettingsChainCodeRepoPath.value = settings.chainCodeRepoPath;
     pathSettingsBackupRootPath.value = settings.backupRootPath;
+    pathSettingsHugoProjectPath.value = settings.hugoProjectPath;
     pathSettingsErrorMessage.value = "";
     return true;
   } catch (error) {
@@ -1537,6 +1728,11 @@ function handleMorePublish() {
   openPublishDialog();
 }
 
+function handleMoreDeploy() {
+  closeMoreActions();
+  openDeployDialog();
+}
+
 function handleDocumentPointerDown(event: PointerEvent) {
   if (!moreActionsOpen.value) {
     return;
@@ -1569,6 +1765,7 @@ function openPathSettingsDialog() {
     !pathSettingsDocumentProjectPath.value
     || !pathSettingsChainCodeRepoPath.value
     || !pathSettingsBackupRootPath.value
+    || !pathSettingsHugoProjectPath.value
   ) {
     void loadPathSettings();
   }
@@ -1593,6 +1790,23 @@ function openPublishDialog() {
   publishMessage.value = "";
 
   if (!pathSettingsDocumentProjectPath.value || !pathSettingsChainCodeRepoPath.value) {
+    void loadPathSettings();
+  }
+}
+
+function openDeployDialog() {
+  closeMoreActions();
+
+  if (!editorApiEnabled) {
+    editorErrorMessage.value = "当前环境不支持一键发布。";
+    return;
+  }
+
+  deployDialogVisible.value = true;
+  deployErrorMessage.value = "";
+  deployMessage.value = "";
+
+  if (!pathSettingsChainCodeRepoPath.value || !pathSettingsHugoProjectPath.value) {
     void loadPathSettings();
   }
 }
@@ -1626,6 +1840,15 @@ function closePublishDialog() {
   publishDialogVisible.value = false;
   publishErrorMessage.value = "";
   publishConflictFiles.value = [];
+}
+
+function closeDeployDialog() {
+  if (deployBusy.value) {
+    return;
+  }
+
+  deployDialogVisible.value = false;
+  deployErrorMessage.value = "";
 }
 
 async function runPublish() {
@@ -1722,6 +1945,101 @@ async function syncPublishJob(jobId: string) {
 
 function scrollPublishTerminalToBottom() {
   const terminal = publishTerminalRef.value;
+  if (!terminal) {
+    return;
+  }
+  terminal.scrollTop = terminal.scrollHeight;
+}
+
+async function runDeploy() {
+  if (!editorApiEnabled || deployBusy.value) {
+    return;
+  }
+
+  if (!confirmDiscardUnsavedChanges()) {
+    return;
+  }
+
+  deployBusy.value = true;
+  deployErrorMessage.value = "";
+  deployMessage.value = "";
+  deployCommitMessage.value = "";
+  deployLogs.value = [];
+  deployJobStatus.value = "idle";
+  deployJobStage.value = "init";
+  editorErrorMessage.value = "";
+  editorSuccessMessage.value = "";
+
+  try {
+    const startResult = await startDeploySite();
+    deployJobId.value = startResult.jobId;
+    startDeployPolling(startResult.jobId);
+  } catch (error) {
+    if (error instanceof DeployRunningError && error.jobId) {
+      deployJobId.value = error.jobId;
+      deployErrorMessage.value = error.message;
+      startDeployPolling(error.jobId);
+      return;
+    }
+
+    deployBusy.value = false;
+    const message = error instanceof Error ? error.message : "站点发布失败。";
+    deployErrorMessage.value = message;
+    editorErrorMessage.value = message;
+  }
+}
+
+function startDeployPolling(jobId: string) {
+  stopDeployPolling();
+  void syncDeployJob(jobId);
+  deployPollTimerId = window.setInterval(() => {
+    void syncDeployJob(jobId);
+  }, 700);
+}
+
+function stopDeployPolling() {
+  if (deployPollTimerId) {
+    window.clearInterval(deployPollTimerId);
+    deployPollTimerId = 0;
+  }
+}
+
+async function syncDeployJob(jobId: string) {
+  try {
+    const snapshot = await fetchDeployJob(jobId);
+    deployJobStatus.value = snapshot.status;
+    deployJobStage.value = snapshot.stage;
+    deployLogs.value = snapshot.logs ?? [];
+    deployMessage.value = snapshot.message ?? "";
+    deployCommitMessage.value = snapshot.commitMessage ?? "";
+
+    await nextTick();
+    scrollDeployTerminalToBottom();
+
+    if (snapshot.status !== "running") {
+      stopDeployPolling();
+      deployBusy.value = false;
+
+      if (snapshot.status === "success") {
+        editorSuccessMessage.value = snapshot.message ?? "站点发布完成。";
+      } else if (snapshot.status === "error") {
+        deployErrorMessage.value = snapshot.message ?? "发布任务执行失败。";
+        editorErrorMessage.value = deployErrorMessage.value;
+      }
+    } else {
+      deployBusy.value = true;
+    }
+  } catch (error) {
+    stopDeployPolling();
+    deployBusy.value = false;
+    const message = error instanceof Error ? error.message : "读取发布进度失败。";
+    deployErrorMessage.value = message;
+    editorErrorMessage.value = message;
+  }
+}
+
+function scrollDeployTerminalToBottom() {
+  const terminal = deployTerminalRef.value;
   if (!terminal) {
     return;
   }
@@ -1847,6 +2165,7 @@ async function savePathSettings() {
   const documentProjectPath = pathSettingsDocumentProjectPath.value.trim();
   const chainCodeRepoPath = pathSettingsChainCodeRepoPath.value.trim();
   const backupRootPath = pathSettingsBackupRootPath.value.trim();
+  const hugoProjectPath = pathSettingsHugoProjectPath.value.trim();
   if (!documentProjectPath || !chainCodeRepoPath) {
     pathSettingsErrorMessage.value = "请填写内容仓库路径和部署仓库路径。";
     return;
@@ -1862,10 +2181,12 @@ async function savePathSettings() {
       documentProjectPath,
       chainCodeRepoPath,
       backupRootPath,
+      hugoProjectPath,
     });
     pathSettingsDocumentProjectPath.value = saved.documentProjectPath;
     pathSettingsChainCodeRepoPath.value = saved.chainCodeRepoPath;
     pathSettingsBackupRootPath.value = saved.backupRootPath;
+    pathSettingsHugoProjectPath.value = saved.hugoProjectPath;
 
     await router.replace({
       name: "home",
@@ -1875,7 +2196,7 @@ async function savePathSettings() {
     await loadTree();
     await loadCurrentArticle();
     closePathSettingsDialog();
-    editorSuccessMessage.value = "仓库与备份路径已更新。";
+    editorSuccessMessage.value = "仓库、发布与备份路径已更新。";
   } catch (error) {
     const message = error instanceof Error ? error.message : "保存路径设置失败。";
     pathSettingsErrorMessage.value = message;

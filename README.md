@@ -71,6 +71,8 @@ npm run pack:win
 npm run pack:mac
 ```
 
+说明：mac 打包会先生成 `.app`，再使用 `hdiutil` 生成 `.dmg`（避免 `bundle_dmg.sh` 在部分环境失败）。
+
 产物目录（默认）：
 
 - `src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/`

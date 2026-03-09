@@ -1,6 +1,7 @@
 ﻿import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -12,15 +13,11 @@ const publicContentRoot = path.resolve(projectRoot, "public", "content");
 const generateContentScript = fileURLToPath(new URL("./scripts/generate-content.mjs", import.meta.url));
 const settingsFile = path.resolve(projectRoot, ".sololog-paths.json");
 const defaultDocumentProjectPath =
-  process.env.DOCUMENT_PROJECT_PATH ??
-  path.resolve(
-    process.env.DOCS_SOURCE_DIR
-      ? path.join(process.env.DOCS_SOURCE_DIR, "..")
-      : "C:/Users/tianzhiwei/Desktop/document",
-  );
+  process.env.DOCUMENT_PROJECT_PATH?.trim() || getDefaultDocumentProjectPath();
 const defaultChainCodeRepoPath =
-  process.env.CHAIN_CODE_REPO_PATH ?? "C:/Users/tianzhiwei/go/src/chain-code.github.io";
+  process.env.CHAIN_CODE_REPO_PATH?.trim() || getDefaultChainCodeRepoPath();
 const defaultBackupRootPath = process.env.BACKUP_ROOT_PATH ?? "";
+const defaultHugoProjectPath = process.env.HUGO_PROJECT_PATH?.trim() ?? "";
 const TYPORA_DOWNLOAD_URL = "https://typora.io/#download";
 const execFileAsync = promisify(execFile);
 
@@ -28,12 +25,14 @@ interface EditorPathSettings {
   documentProjectPath: string;
   chainCodeRepoPath: string;
   backupRootPath: string;
+  hugoProjectPath: string;
 }
 
 let runtimePathSettings: EditorPathSettings = {
   documentProjectPath: defaultDocumentProjectPath,
   chainCodeRepoPath: defaultChainCodeRepoPath,
   backupRootPath: defaultBackupRootPath,
+  hugoProjectPath: defaultHugoProjectPath,
 };
 
 type PublishJobStatus = "running" | "success" | "error" | "conflict";
@@ -111,8 +110,8 @@ interface RuntimeContentPaths {
 }
 
 function resolveRuntimeContentPaths(settings: EditorPathSettings = runtimePathSettings): RuntimeContentPaths {
-  const documentProjectPath = path.resolve(settings.documentProjectPath);
-  const chainCodeRepoPath = path.resolve(settings.chainCodeRepoPath);
+  const documentProjectPath = absolutizeForCurrentPlatform(settings.documentProjectPath);
+  const chainCodeRepoPath = absolutizeForCurrentPlatform(settings.chainCodeRepoPath);
   return {
     documentProjectPath,
     chainCodeRepoPath,
@@ -131,18 +130,22 @@ async function loadPathSettingsFromDisk(): Promise<EditorPathSettings> {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
 
     const nextSettings: EditorPathSettings = {
-      documentProjectPath:
-        typeof parsed.documentProjectPath === "string" && parsed.documentProjectPath.trim()
-          ? parsed.documentProjectPath.trim()
-          : defaultDocumentProjectPath,
-      chainCodeRepoPath:
-        typeof parsed.chainCodeRepoPath === "string" && parsed.chainCodeRepoPath.trim()
-          ? parsed.chainCodeRepoPath.trim()
-          : defaultChainCodeRepoPath,
+      documentProjectPath: normalizeLoadedRepoPath(
+        typeof parsed.documentProjectPath === "string" ? parsed.documentProjectPath : "",
+        defaultDocumentProjectPath,
+      ),
+      chainCodeRepoPath: normalizeLoadedRepoPath(
+        typeof parsed.chainCodeRepoPath === "string" ? parsed.chainCodeRepoPath : "",
+        defaultChainCodeRepoPath,
+      ),
       backupRootPath:
         typeof parsed.backupRootPath === "string" && parsed.backupRootPath.trim()
           ? parsed.backupRootPath.trim()
           : defaultBackupRootPath,
+      hugoProjectPath:
+        typeof parsed.hugoProjectPath === "string" && parsed.hugoProjectPath.trim()
+          ? parsed.hugoProjectPath.trim()
+          : defaultHugoProjectPath,
     };
     return nextSettings;
   } catch {
@@ -150,6 +153,7 @@ async function loadPathSettingsFromDisk(): Promise<EditorPathSettings> {
       documentProjectPath: defaultDocumentProjectPath,
       chainCodeRepoPath: defaultChainCodeRepoPath,
       backupRootPath: defaultBackupRootPath,
+      hugoProjectPath: defaultHugoProjectPath,
     };
   }
 }
@@ -159,9 +163,16 @@ async function savePathSettingsToDisk(settings: EditorPathSettings) {
 }
 
 function normalizePathSettingsPayload(payload: Record<string, unknown>): EditorPathSettings {
-  const documentProjectPath = toRequiredString(payload.documentProjectPath, "documentProjectPath").trim();
-  const chainCodeRepoPath = toRequiredString(payload.chainCodeRepoPath, "chainCodeRepoPath").trim();
+  const documentProjectPath = normalizeLoadedRepoPath(
+    toRequiredString(payload.documentProjectPath, "documentProjectPath"),
+    defaultDocumentProjectPath,
+  );
+  const chainCodeRepoPath = normalizeLoadedRepoPath(
+    toRequiredString(payload.chainCodeRepoPath, "chainCodeRepoPath"),
+    defaultChainCodeRepoPath,
+  );
   const backupRootPath = toOptionalString(payload.backupRootPath).trim();
+  const hugoProjectPath = toOptionalString(payload.hugoProjectPath).trim();
 
   if (!documentProjectPath) {
     throw new ApiError(400, "documentProjectPath is required.");
@@ -174,6 +185,7 @@ function normalizePathSettingsPayload(payload: Record<string, unknown>): EditorP
     documentProjectPath,
     chainCodeRepoPath,
     backupRootPath,
+    hugoProjectPath,
   };
 }
 
@@ -184,22 +196,88 @@ async function assertPathSettingsValid(settings: EditorPathSettings) {
   await assertFileExists(runtimePaths.homeIndexFile, "Content home _index.md");
   await assertDirectoryExists(runtimePaths.chainCodeRepoPath, "Deploy repository path");
   if (settings.backupRootPath.trim()) {
-    await ensureDirectoryExists(path.resolve(settings.backupRootPath), "Backup root path");
+    await ensureDirectoryExists(absolutizeForCurrentPlatform(settings.backupRootPath), "Backup root path");
+  }
+  if (settings.hugoProjectPath.trim()) {
+    await assertDirectoryExists(absolutizeForCurrentPlatform(settings.hugoProjectPath), "Hugo project path");
   }
 }
 
 function toPathSettingsResponse(settings: EditorPathSettings) {
   const runtimePaths = resolveRuntimeContentPaths(settings);
   const backupRootPath = settings.backupRootPath.trim()
-    ? path.resolve(settings.backupRootPath.trim())
+    ? absolutizeForCurrentPlatform(settings.backupRootPath.trim())
+    : "";
+  const hugoProjectPath = settings.hugoProjectPath.trim()
+    ? absolutizeForCurrentPlatform(settings.hugoProjectPath.trim())
     : "";
   return {
     documentProjectPath: runtimePaths.documentProjectPath,
     chainCodeRepoPath: runtimePaths.chainCodeRepoPath,
     backupRootPath,
+    hugoProjectPath,
     docsSourceDir: runtimePaths.docsSourceDir,
     homeIndexFile: runtimePaths.homeIndexFile,
   };
+}
+
+function getDefaultDocumentProjectPath() {
+  const home = os.homedir();
+  return home ? path.join(home, "Desktop", "document") : "";
+}
+
+function getDefaultChainCodeRepoPath() {
+  const home = os.homedir();
+  return home ? path.join(home, "go", "src", "chain-code.github.io") : "";
+}
+
+function normalizeLoadedRepoPath(input: string, fallback: string) {
+  const value = input.trim();
+  if (!value) {
+    return fallback;
+  }
+  if (containsEmbeddedWindowsDrivePath(value)) {
+    return fallback;
+  }
+  if (process.platform !== "win32" && looksLikeWindowsAbsolutePath(value)) {
+    return fallback;
+  }
+  if (process.platform === "win32" && value.startsWith("/")) {
+    return fallback;
+  }
+  if (!isAbsoluteForCurrentPlatform(value)) {
+    return fallback;
+  }
+  return value;
+}
+
+function isAbsoluteForCurrentPlatform(value: string) {
+  if (process.platform === "win32") {
+    return path.win32.isAbsolute(value);
+  }
+  return path.posix.isAbsolute(value);
+}
+
+function absolutizeForCurrentPlatform(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (isAbsoluteForCurrentPlatform(trimmed)) {
+    return trimmed;
+  }
+  if (process.platform !== "win32" && looksLikeWindowsAbsolutePath(trimmed)) {
+    return trimmed;
+  }
+  return path.resolve(trimmed);
+}
+
+function looksLikeWindowsAbsolutePath(value: string) {
+  return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
+}
+
+function containsEmbeddedWindowsDrivePath(value: string) {
+  return /[\\/][A-Za-z]:[\\/]/.test(value);
 }
 
 function createEditorApiPlugin() {
@@ -1386,5 +1464,4 @@ export default defineConfig({
     port: 5173,
   },
 });
-
 

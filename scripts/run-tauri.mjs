@@ -14,6 +14,19 @@ function splitPathEntries(pathValue, separator) {
     .filter(Boolean);
 }
 
+function resolveExecutableName() {
+  return process.platform === "win32" ? "cargo.exe" : "cargo";
+}
+
+function hasCargoInPath(env) {
+  const separator = process.platform === "win32" ? ";" : ":";
+  const pathKey = resolvePathKey(env);
+  const currentPathValue = env[pathKey] ?? "";
+  const executable = resolveExecutableName();
+  const entries = splitPathEntries(currentPathValue, separator);
+  return entries.some((entry) => existsSync(path.join(entry, executable)));
+}
+
 function prependPath(env, newEntry) {
   const separator = process.platform === "win32" ? ";" : ":";
   const pathKey = resolvePathKey(env);
@@ -43,12 +56,28 @@ function collectCargoBinCandidates() {
     candidates.push(path.join(userHome, ".cargo", "bin"));
   }
 
+  if (process.platform === "darwin") {
+    candidates.push("/opt/homebrew/bin");
+    candidates.push("/usr/local/bin");
+    candidates.push("/opt/homebrew/opt/rustup/bin");
+  }
+
+  if (process.platform === "linux") {
+    candidates.push("/usr/local/bin");
+    candidates.push("/usr/bin");
+  }
+
   return candidates;
 }
 
 function ensureCargoOnPath(env) {
+  if (hasCargoInPath(env)) {
+    return "<PATH>";
+  }
+
+  const executable = resolveExecutableName();
   for (const candidate of collectCargoBinCandidates()) {
-    if (existsSync(path.join(candidate, process.platform === "win32" ? "cargo.exe" : "cargo"))) {
+    if (existsSync(path.join(candidate, executable))) {
       prependPath(env, candidate);
       return candidate;
     }

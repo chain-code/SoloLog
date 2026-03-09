@@ -7,17 +7,30 @@ const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
 const settingsFile = path.join(projectRoot, ".sololog-paths.json");
 
-const defaultDocumentProjectPath = "C:/Users/tianzhiwei/Desktop/document";
-
 const publicContentDir = path.join(projectRoot, "public", "content");
 const publicDocsDir = path.join(publicContentDir, "docs");
 const treeOutputFile = path.join(publicContentDir, "content-tree.json");
 const homeOutputFile = path.join(publicContentDir, "_index.md");
 
 async function main() {
-  const { docsSourceDir, homeSourceFile } = await resolveContentSourcePaths();
-  await ensurePathExists(docsSourceDir, "docs source directory");
-  await ensurePathExists(homeSourceFile, "home markdown file");
+  const source = await resolveContentSourcePaths();
+  if (!source) {
+    await writeEmptyContentSnapshot(
+      "未配置可用的 documentProjectPath，已生成空内容并继续。请在设置中配置后重新加载。",
+    );
+    return;
+  }
+
+  const { docsSourceDir, homeSourceFile } = source;
+
+  const docsReady = await exists(docsSourceDir);
+  const homeReady = await exists(homeSourceFile);
+  if (!docsReady || !homeReady) {
+    await writeEmptyContentSnapshot(
+      "内容路径不可用，已生成空内容并继续。请检查路径设置后重新加载。",
+    );
+    return;
+  }
 
   await fs.mkdir(publicContentDir, { recursive: true });
   await fs.rm(publicDocsDir, {
@@ -46,41 +59,95 @@ async function main() {
 }
 
 async function resolveContentSourcePaths() {
-  const docsSourceDirFromEnv = process.env.DOCS_SOURCE_DIR?.trim();
-  const homeSourceFileFromEnv = process.env.HOME_INDEX_FILE?.trim();
-  if (docsSourceDirFromEnv && homeSourceFileFromEnv) {
-    return {
-      docsSourceDir: docsSourceDirFromEnv,
-      homeSourceFile: homeSourceFileFromEnv,
-    };
+  let raw = "";
+  try {
+    raw = await fs.readFile(settingsFile, "utf8");
+  } catch {
+    return null;
   }
 
+  let parsed = {};
   try {
-    const raw = await fs.readFile(settingsFile, "utf8");
-    const parsed = JSON.parse(raw);
-    if (typeof parsed.documentProjectPath === "string" && parsed.documentProjectPath.trim()) {
-      const documentProjectPath = parsed.documentProjectPath.trim();
-      return {
-        docsSourceDir: path.join(documentProjectPath, "docs"),
-        homeSourceFile: path.join(documentProjectPath, "_index.md"),
-      };
-    }
+    parsed = JSON.parse(raw);
   } catch {
-    // fallback to default path
+    return null;
+  }
+
+  if (typeof parsed.documentProjectPath !== "string" || !parsed.documentProjectPath.trim()) {
+    return null;
+  }
+
+  const documentProjectPath = normalizeDocumentProjectPath(parsed.documentProjectPath.trim());
+  if (!documentProjectPath) {
+    return null;
   }
 
   return {
-    docsSourceDir: path.join(defaultDocumentProjectPath, "docs"),
-    homeSourceFile: path.join(defaultDocumentProjectPath, "_index.md"),
+    docsSourceDir: path.join(documentProjectPath, "docs"),
+    homeSourceFile: path.join(documentProjectPath, "_index.md"),
   };
 }
 
-async function ensurePathExists(targetPath, label) {
-  try {
-    await fs.access(targetPath);
-  } catch {
-    throw new Error(`Missing ${label}: ${targetPath}`);
+function normalizeDocumentProjectPath(value) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
   }
+
+  if (containsEmbeddedWindowsDrivePath(trimmed)) {
+    return null;
+  }
+
+  if (process.platform !== "win32" && looksLikeWindowsAbsolutePath(trimmed)) {
+    return null;
+  }
+
+  if (process.platform === "win32" && trimmed.startsWith("/")) {
+    return null;
+  }
+
+  return trimmed;
+}
+
+function looksLikeWindowsAbsolutePath(value) {
+  return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
+}
+
+function containsEmbeddedWindowsDrivePath(value) {
+  return /[\\/][A-Za-z]:[\\/]/.test(value);
+}
+
+async function writeEmptyContentSnapshot(message) {
+  await fs.mkdir(publicContentDir, { recursive: true });
+  await fs.rm(publicDocsDir, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 120,
+  });
+  await fs.rm(path.join(publicContentDir, "content-search.json"), { force: true });
+  await fs.mkdir(publicDocsDir, { recursive: true });
+
+  const homeMarkdown = [
+    "---",
+    "title: Home",
+    "weight: 1",
+    "---",
+    "",
+    "# SoloLog",
+    "",
+    "当前未加载文档内容，请先在路径设置中配置 `documentProjectPath`。",
+    "",
+  ].join("\n");
+  const treePayload = {
+    generatedAt: new Date().toISOString(),
+    docsSourceDir: "",
+    nodes: [],
+  };
+
+  await fs.writeFile(homeOutputFile, homeMarkdown, "utf8");
+  await fs.writeFile(treeOutputFile, JSON.stringify(treePayload, null, 2), "utf8");
+  console.log(`[prepare:content] ${message}`);
 }
 
 async function buildSection(absDir, relDir) {
