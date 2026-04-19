@@ -670,6 +670,7 @@
         <article
           ref="articleRef"
           class="markdown"
+          @dblclick="openMermaidViewer"
         >
           <Transition
             name="fade-content"
@@ -1252,11 +1253,158 @@
         </section>
       </div>
     </Transition>
+
+    <Transition name="fade-content">
+      <div
+        v-if="mermaidViewerVisible"
+        class="mermaid-viewer-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="流程图大图"
+        @click.self="closeMermaidViewer"
+      >
+        <div class="mermaid-viewer-toolbar">
+          <span
+            class="mermaid-viewer-tool-wrap"
+            data-tip="缩小"
+          >
+            <button
+              type="button"
+              class="mermaid-viewer-tool"
+              aria-label="缩小流程图"
+              :disabled="mermaidViewerScale <= mermaidViewerMinScale"
+              @click="zoomMermaidViewer(-0.2)"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M7 12h10"
+                  stroke="currentColor"
+                  stroke-width="1.9"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+          </span>
+
+          <span
+            class="mermaid-viewer-tool-wrap"
+            data-tip="重置"
+          >
+            <button
+              type="button"
+              class="mermaid-viewer-tool"
+              aria-label="重置流程图大小"
+              @click="resetMermaidViewerZoom"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M6.5 7.2A7 7 0 1 1 5 12"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M6.5 4v3.2h3.2"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          </span>
+
+          <span
+            class="mermaid-viewer-tool-wrap"
+            data-tip="放大"
+          >
+            <button
+              type="button"
+              class="mermaid-viewer-tool"
+              aria-label="放大流程图"
+              :disabled="mermaidViewerScale >= mermaidViewerMaxScale"
+              @click="zoomMermaidViewer(0.2)"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M12 7v10"
+                  stroke="currentColor"
+                  stroke-width="1.9"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M7 12h10"
+                  stroke="currentColor"
+                  stroke-width="1.9"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+          </span>
+
+          <span
+            class="mermaid-viewer-tool-wrap"
+            data-tip="关闭"
+          >
+            <button
+              type="button"
+              class="mermaid-viewer-tool"
+              aria-label="关闭流程图大图"
+              @click="closeMermaidViewer"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M7 7l10 10"
+                  stroke="currentColor"
+                  stroke-width="1.9"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M17 7L7 17"
+                  stroke="currentColor"
+                  stroke-width="1.9"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+          </span>
+        </div>
+
+        <div
+          class="mermaid-viewer-stage"
+          @wheel.ctrl.prevent="handleMermaidViewerWheel"
+        >
+          <div
+            ref="mermaidViewerContentRef"
+            class="mermaid-viewer-content"
+            :style="mermaidViewerContentStyle"
+            v-html="mermaidViewerHtml"
+          />
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
 <script setup lang="ts">
 import MarkdownIt from "markdown-it";
+import type { MermaidConfig } from "mermaid";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import ContentTree from "@/components/content/ContentTree.vue";
@@ -1303,6 +1451,24 @@ const md = new MarkdownIt({
   typographer: true,
 });
 
+const mermaidConfig = {
+  startOnLoad: false,
+  securityLevel: "loose",
+  theme: "base",
+  flowchart: {
+    htmlLabels: true,
+  },
+  themeVariables: {
+    fontFamily: `"Inter", "Segoe UI", sans-serif`,
+    primaryColor: "#eff6ff",
+    primaryTextColor: "#1f2937",
+    primaryBorderColor: "#93b5f6",
+    lineColor: "#5b6f91",
+    secondaryColor: "#f8fbff",
+    tertiaryColor: "#eef4ff",
+  },
+} satisfies MermaidConfig;
+
 const defaultImageRenderer = md.renderer.rules.image
   ?? ((tokens, index, options, _env, self) => self.renderToken(tokens, index, options));
 md.renderer.rules.image = (tokens, index, options, env, self) => {
@@ -1311,6 +1477,19 @@ md.renderer.rules.image = (tokens, index, options, env, self) => {
     token.attrSet("referrerpolicy", "no-referrer");
   }
   return defaultImageRenderer(tokens, index, options, env, self);
+};
+
+const defaultFenceRenderer = md.renderer.rules.fence
+  ?? ((tokens, index, options, _env, self) => self.renderToken(tokens, index, options));
+md.renderer.rules.fence = (tokens, index, options, env, self) => {
+  const token = tokens[index];
+  const language = getFenceLanguage(token.info);
+
+  if (language === "mermaid" || language === "mmd") {
+    return `<div class="mermaid-diagram"><div class="mermaid">${escapeHtml(token.content)}</div></div>\n`;
+  }
+
+  return defaultFenceRenderer(tokens, index, options, env, self);
 };
 
 const tree = ref<ContentNode[]>([]);
@@ -1382,9 +1561,18 @@ const typoraInstallDialogVisible = ref(false);
 const typoraInstallMessage = ref("");
 const typoraInstallUrl = ref("https://typora.io/#download");
 const docsSourceDirLabel = ref("content/docs");
+const mermaidViewerVisible = ref(false);
+const mermaidViewerHtml = ref("");
+const mermaidViewerScale = ref(1);
+const mermaidViewerBaseWidth = ref(0);
+const mermaidViewerBaseHeight = ref(0);
+const mermaidViewerContentRef = ref<HTMLElement | null>(null);
 const editorApiEnabled = window.location.protocol.startsWith("http");
+const mermaidViewerMinScale = 0.4;
+const mermaidViewerMaxScale = 3;
 
 type BarChipTone = "neutral" | "info" | "success" | "warning" | "danger";
+type MermaidApi = typeof import("mermaid").default;
 
 const moreActionsOpen = ref(false);
 const moreActionsRef = ref<HTMLElement | null>(null);
@@ -1395,6 +1583,10 @@ let publishPollTimerId = 0;
 let deployPollTimerId = 0;
 let backupPollTimerId = 0;
 let editorResizeRafId = 0;
+let mermaidRenderGeneration = 0;
+let mermaidRenderSequence = 0;
+let mermaidApi: MermaidApi | null = null;
+let mermaidViewerRenderGeneration = 0;
 
 const currentArticlePath = computed(() =>
   typeof route.query.article === "string" ? route.query.article : "",
@@ -1402,6 +1594,16 @@ const currentArticlePath = computed(() =>
 const isSpecialArticle = computed(
   () => Boolean(currentArticlePath.value) && isSpecialIndexArticle(tree.value, currentArticlePath.value),
 );
+const mermaidViewerContentStyle = computed(() => {
+  if (mermaidViewerBaseWidth.value <= 0 || mermaidViewerBaseHeight.value <= 0) {
+    return {};
+  }
+
+  return {
+    width: `${Math.round(mermaidViewerBaseWidth.value * mermaidViewerScale.value)}px`,
+    height: `${Math.round(mermaidViewerBaseHeight.value * mermaidViewerScale.value)}px`,
+  };
+});
 const showTocPanel = computed(() => Boolean(currentArticlePath.value) && !isSpecialArticle.value);
 
 const currentTitle = computed(() => {
@@ -1624,6 +1826,7 @@ watch(
 onMounted(async () => {
   window.addEventListener("scroll", handleWindowScroll, { passive: true });
   window.addEventListener("resize", handleWindowScroll, { passive: true });
+  window.addEventListener("keydown", handleWindowKeydown);
   document.addEventListener("pointerdown", handleDocumentPointerDown);
   await loadPathSettings();
   await loadTree();
@@ -1632,9 +1835,12 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  mermaidRenderGeneration += 1;
   window.removeEventListener("scroll", handleWindowScroll);
   window.removeEventListener("resize", handleWindowScroll);
+  window.removeEventListener("keydown", handleWindowKeydown);
   document.removeEventListener("pointerdown", handleDocumentPointerDown);
+  document.body.classList.remove("mermaid-viewer-open");
   stopPublishPolling();
   stopDeployPolling();
   stopBackupPolling();
@@ -2221,6 +2427,7 @@ async function loadTree() {
 }
 
 async function loadCurrentArticle() {
+  closeMermaidViewer();
   loading.value = true;
   errorMessage.value = "";
   editorErrorMessage.value = "";
@@ -2246,6 +2453,7 @@ async function loadCurrentArticle() {
     if (isEditMode.value && canEditCurrentArticle.value) {
       resizeEditorHeight();
     }
+    await renderMermaidDiagrams();
     observeHeadings();
     updateReadingProgress();
 
@@ -2380,10 +2588,275 @@ function enhanceRenderedHtml(html: string) {
   );
 }
 
+async function renderMermaidDiagrams() {
+  if (isEditMode.value) {
+    return;
+  }
+
+  const articleElement = articleRef.value;
+  if (!articleElement) {
+    return;
+  }
+
+  const nodes = Array.from(articleElement.querySelectorAll<HTMLElement>(".mermaid"))
+    .filter((node) => node.dataset.mermaidRendered !== "true");
+  if (nodes.length === 0) {
+    return;
+  }
+
+  const generation = mermaidRenderGeneration + 1;
+  mermaidRenderGeneration = generation;
+
+  let mermaid: MermaidApi;
+  try {
+    mermaid = await loadMermaidApi();
+  } catch (error) {
+    nodes.forEach((node) => renderMermaidError(node, node.textContent?.trim() ?? "", error));
+    return;
+  }
+
+  if (generation !== mermaidRenderGeneration) {
+    return;
+  }
+
+  for (const node of nodes) {
+    const source = node.textContent?.trim() ?? "";
+    if (!source) {
+      node.dataset.mermaidRendered = "true";
+      continue;
+    }
+
+    node.dataset.mermaidSource = source;
+    node.classList.remove("mermaid-error");
+    node.classList.add("mermaid-loading");
+
+    try {
+      const id = `mermaid-${generation}-${++mermaidRenderSequence}`;
+      const { svg, bindFunctions } = await mermaid.render(id, source);
+      if (generation !== mermaidRenderGeneration || !node.isConnected) {
+        return;
+      }
+
+      node.innerHTML = svg;
+      node.dataset.mermaidRendered = "true";
+      bindFunctions?.(node);
+    } catch (error) {
+      if (generation !== mermaidRenderGeneration || !node.isConnected) {
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : "流程图渲染失败";
+      renderMermaidError(node, source, message);
+    } finally {
+      if (node.isConnected) {
+        node.classList.remove("mermaid-loading");
+      }
+    }
+  }
+}
+
+function renderMermaidError(node: HTMLElement, source: string, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "流程图渲染失败");
+  node.dataset.mermaidSource = source;
+  node.classList.remove("mermaid-loading");
+  node.classList.add("mermaid-error");
+  node.title = message;
+  node.innerHTML = [
+    `<p class="mermaid-error-message">流程图渲染失败，请检查 Mermaid 语法。</p>`,
+    `<pre><code>${escapeHtml(source)}</code></pre>`,
+  ].join("");
+  node.dataset.mermaidRendered = "true";
+}
+
+async function loadMermaidApi() {
+  if (mermaidApi) {
+    return mermaidApi;
+  }
+
+  const module = await import("mermaid");
+  mermaidApi = module.default;
+  mermaidApi.initialize(mermaidConfig);
+  return mermaidApi;
+}
+
+async function openMermaidViewer(event: MouseEvent) {
+  if (isEditMode.value) {
+    return;
+  }
+
+  const target = event.target instanceof Element ? event.target : null;
+  const diagramElement = target?.closest(".mermaid-diagram") as HTMLElement | null;
+  if (!diagramElement || !articleRef.value?.contains(diagramElement)) {
+    return;
+  }
+
+  const mermaidElement = diagramElement.querySelector<HTMLElement>(".mermaid");
+  if (!mermaidElement || mermaidElement.classList.contains("mermaid-error")) {
+    return;
+  }
+
+  const source = mermaidElement.dataset.mermaidSource?.trim() ?? "";
+  const renderedSvg = mermaidElement.querySelector<SVGElement>("svg");
+  if (!source && !renderedSvg) {
+    return;
+  }
+
+  event.preventDefault();
+  resetMermaidViewerZoom();
+  mermaidViewerHtml.value = renderedSvg?.outerHTML ?? "";
+  mermaidViewerVisible.value = true;
+  document.body.classList.add("mermaid-viewer-open");
+  await nextTick();
+  updateMermaidViewerBaseSize();
+
+  if (!source) {
+    return;
+  }
+
+  const generation = mermaidViewerRenderGeneration + 1;
+  mermaidViewerRenderGeneration = generation;
+
+  try {
+    const mermaid = await loadMermaidApi();
+    const id = `mermaid-viewer-${generation}-${++mermaidRenderSequence}`;
+    const { svg, bindFunctions } = await mermaid.render(id, source);
+    if (!mermaidViewerVisible.value || generation !== mermaidViewerRenderGeneration) {
+      return;
+    }
+
+    mermaidViewerHtml.value = svg;
+    await nextTick();
+    updateMermaidViewerBaseSize();
+    if (mermaidViewerContentRef.value) {
+      bindFunctions?.(mermaidViewerContentRef.value);
+    }
+  } catch (error) {
+    if (!mermaidViewerHtml.value) {
+      mermaidViewerHtml.value = buildMermaidViewerErrorHtml(source, error);
+    }
+  }
+}
+
+function closeMermaidViewer() {
+  mermaidViewerRenderGeneration += 1;
+  mermaidViewerVisible.value = false;
+  mermaidViewerHtml.value = "";
+  mermaidViewerScale.value = 1;
+  mermaidViewerBaseWidth.value = 0;
+  mermaidViewerBaseHeight.value = 0;
+  document.body.classList.remove("mermaid-viewer-open");
+}
+
+function zoomMermaidViewer(delta: number) {
+  mermaidViewerScale.value = clampMermaidViewerScale(mermaidViewerScale.value + delta);
+}
+
+function resetMermaidViewerZoom() {
+  mermaidViewerScale.value = 1;
+}
+
+function updateMermaidViewerBaseSize() {
+  const svg = mermaidViewerContentRef.value?.querySelector<SVGSVGElement>("svg");
+  if (!svg) {
+    mermaidViewerBaseWidth.value = 0;
+    mermaidViewerBaseHeight.value = 0;
+    return;
+  }
+
+  const viewBox = svg.viewBox.baseVal;
+  const renderedRect = svg.getBoundingClientRect();
+  const width = viewBox.width || parseSvgLength(svg.getAttribute("width")) || renderedRect.width;
+  const height = viewBox.height || parseSvgLength(svg.getAttribute("height")) || renderedRect.height;
+  mermaidViewerBaseWidth.value = Math.max(1, width);
+  mermaidViewerBaseHeight.value = Math.max(1, height);
+}
+
+function parseSvgLength(value: string | null) {
+  if (!value) {
+    return 0;
+  }
+
+  const match = value.match(/^\d+(?:\.\d+)?/);
+  if (!match) {
+    return 0;
+  }
+
+  const numericValue = Number(match[0]);
+  return Number.isFinite(numericValue) ? numericValue : 0;
+}
+
+function handleMermaidViewerWheel(event: WheelEvent) {
+  zoomMermaidViewer(event.deltaY > 0 ? -0.15 : 0.15);
+}
+
+function handleWindowKeydown(event: KeyboardEvent) {
+  if (!mermaidViewerVisible.value) {
+    return;
+  }
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeMermaidViewer();
+    return;
+  }
+
+  if (event.key === "+" || event.key === "=") {
+    event.preventDefault();
+    zoomMermaidViewer(0.2);
+    return;
+  }
+
+  if (event.key === "-") {
+    event.preventDefault();
+    zoomMermaidViewer(-0.2);
+    return;
+  }
+
+  if (event.key === "0") {
+    event.preventDefault();
+    resetMermaidViewerZoom();
+  }
+}
+
+function clampMermaidViewerScale(value: number) {
+  const clamped = Math.min(mermaidViewerMaxScale, Math.max(mermaidViewerMinScale, value));
+  return Math.round(clamped * 100) / 100;
+}
+
+function buildMermaidViewerErrorHtml(source: string, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "流程图渲染失败");
+  return [
+    `<div class="mermaid-error" title="${escapeHtml(message)}">`,
+    `<p class="mermaid-error-message">流程图渲染失败，请检查 Mermaid 语法。</p>`,
+    `<pre><code>${escapeHtml(source)}</code></pre>`,
+    "</div>",
+  ].join("");
+}
+
 function normalizeMarkdownForRender(content: string) {
-  return content
+  return normalizeMermaidShortcodes(content)
     .replace(/^[ \t]*[-+*][ \t]*$/gm, "")
     .replace(/\n{3,}/g, "\n\n");
+}
+
+function normalizeMermaidShortcodes(content: string) {
+  return content.replace(
+    /^\s*\{\{<\s*mermaid(?:\s+[^>]*)?>\}\}\s*\r?\n([\s\S]*?)^\s*\{\{<\s*\/mermaid\s*>\}\}\s*$/gim,
+    (_match, diagram: string) => `\n\`\`\`mermaid\n${diagram.trim()}\n\`\`\`\n`,
+  );
+}
+
+function getFenceLanguage(info: string) {
+  return (info.trim().split(/\s+/)[0] ?? "").replace(/^\{|\}$/g, "").toLowerCase();
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function createUniqueSlug(base: string, usedSlugs: Map<string, number>) {
@@ -2518,8 +2991,14 @@ function markEditorDirty() {
   queueEditorHeightSync();
 }
 
-function handleContentAfterEnter() {
-  if (!isEditMode.value || !canEditCurrentArticle.value) {
+async function handleContentAfterEnter() {
+  if (!isEditMode.value) {
+    await renderMermaidDiagrams();
+    updateReadingProgress();
+    return;
+  }
+
+  if (!canEditCurrentArticle.value) {
     return;
   }
   queueEditorHeightSync();
@@ -4021,6 +4500,165 @@ input.toggle {
   border: 0;
   background: transparent;
   padding: 0;
+}
+
+.markdown-inner :deep(.mermaid-diagram) {
+  overflow-x: auto;
+  border: 1px solid #dbe3f0;
+  border-radius: 12px;
+  background: #fbfdff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  cursor: zoom-in;
+  margin: 1.08rem 0;
+  padding: 1rem;
+}
+
+.markdown-inner :deep(.mermaid) {
+  min-width: 0;
+  text-align: center;
+}
+
+.markdown-inner :deep(.mermaid svg) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.markdown-inner :deep(.mermaid-error) {
+  cursor: default;
+  text-align: left;
+}
+
+.markdown-inner :deep(.mermaid-error-message) {
+  margin: 0 0 0.65rem;
+  padding-inline-start: 0;
+  color: var(--danger-text);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.markdown-inner :deep(.mermaid-error pre) {
+  margin: 0;
+}
+
+:global(body.mermaid-viewer-open) {
+  overflow: hidden;
+}
+
+.mermaid-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.7rem;
+  background: rgba(15, 23, 42, 0.92);
+  padding: 0.75rem;
+}
+
+.mermaid-viewer-toolbar {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.mermaid-viewer-tool-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.mermaid-viewer-tool-wrap::after {
+  position: absolute;
+  right: 50%;
+  bottom: -2.15rem;
+  transform: translateX(50%);
+  z-index: 2;
+  content: attr(data-tip);
+  pointer-events: none;
+  opacity: 0;
+  white-space: nowrap;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.94);
+  color: #f8fafc;
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.4rem 0.5rem;
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.mermaid-viewer-tool-wrap:hover::after {
+  opacity: 1;
+  transform: translateX(50%) translateY(2px);
+}
+
+.mermaid-viewer-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border: 1px solid rgba(203, 213, 225, 0.38);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.94);
+  color: #1f2937;
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+}
+
+.mermaid-viewer-tool:hover:not(:disabled) {
+  border-color: rgba(147, 181, 246, 0.78);
+  background: #fff;
+  transform: translateY(-1px);
+}
+
+.mermaid-viewer-tool:focus-visible {
+  outline: 2px solid rgba(147, 197, 253, 0.72);
+  outline-offset: 2px;
+}
+
+.mermaid-viewer-tool:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.mermaid-viewer-tool svg {
+  width: 1.16rem;
+  height: 1.16rem;
+}
+
+.mermaid-viewer-stage {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid rgba(203, 213, 225, 0.34);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 1.2rem;
+}
+
+.mermaid-viewer-content {
+  display: inline-block;
+  min-width: max-content;
+  min-height: max-content;
+}
+
+.mermaid-viewer-content :deep(svg) {
+  display: block;
+  width: 100%;
+  max-width: none !important;
+  height: 100%;
+  margin: 0 auto;
+}
+
+.mermaid-viewer-content :deep(.mermaid-error) {
+  max-width: 56rem;
+  border: 1px solid #f2caca;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  padding: 1rem;
 }
 
 .markdown-inner :deep(blockquote) {
